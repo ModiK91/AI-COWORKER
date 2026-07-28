@@ -1,0 +1,1 @@
+print("My AI Co-Worker environment is working!")  # This displays a message on screen to prove Python runs correctly
