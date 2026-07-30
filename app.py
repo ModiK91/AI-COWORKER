@@ -9,6 +9,12 @@ import smtplib  # Python's built-in tool for sending emails
 load_dotenv()  # Loads ANTHROPIC_API_KEY from .env
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))  # Creates our connection to Claude
 
+with open("company_policy.txt", "r") as file:  # Opens our company document
+    document_text = file.read()  # Reads its entire contents
+
+chunks = document_text.split("\n\n")  # Splits it into separate topic chunks
+context = "\n\n".join(chunks)  # Rejoins them into one context block to hand to Claude when needed
+
 my_email = "Adam@M365x13102857.onmicrosoft.com"  # The email address we send FROM
 my_password = os.getenv("EMAIL_PASSWORD")  # Reads the EMAIL_PASSWORD value from .env
 
@@ -36,20 +42,31 @@ user_message = st.chat_input("What do you need help with?")  # Chat input box at
 if user_message:  # Runs only when the user types something
     st.session_state.messages.append({"role": "user", "content": user_message})  # Stores the user's message with its role
 
-    response = client.messages.create(  # Sends the message to Claude for classification
+    response = client.messages.create(  # Sends the full conversation to Claude for classification
         model="claude-sonnet-4-6",  # Which Claude model to use
         max_tokens=20,  # We only need one short word back
-        messages=[
-            {"role": "user", "content": f"A user typed: '{user_message}'. Reply with ONLY one word: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, or UNKNOWN."}  # Asks Claude to classify the request
-        ]
+        system="Reply with ONLY one word: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, KNOWLEDGE_QUESTION, or UNKNOWN, based on the user's most recent message and the conversation so far. Use KNOWLEDGE_QUESTION when the user is asking about company policies or information, rather than requesting an action.",  # Instructions that apply to the whole conversation
+        messages=st.session_state.messages  # Sends the ENTIRE conversation history, not just the latest message
     )
 
     intent = response.content[0].text.strip()  # Extracts Claude's one-word classification
 
-    st.session_state.messages.append({"role": "assistant", "content": f"I understood this as: {intent}"})  # Stores Claude's classification as the visible reply
-    st.session_state.pending_intent = intent  # Remembers this classification so we can show a confirm button for it
+    if intent == "KNOWLEDGE_QUESTION":  # If this is a question, not an action request
+        answer_response = client.messages.create(  # Asks Claude to answer using our document as context
+            model="claude-sonnet-4-6",  # Which Claude model to use
+            max_tokens=300,  # Maximum length of the answer
+            system=f"Answer the user's question using ONLY the information in this context. If the answer isn't in the context, say you don't know.\n\nContext:\n{context}",  # Grounds Claude's answer in our document
+            messages=[
+                {"role": "user", "content": user_message}  # The user's actual question
+            ]
+        )
+        answer_text = answer_response.content[0].text  # Extracts the answer text
+        st.session_state.messages.append({"role": "assistant", "content": answer_text})  # Shows the answer directly, no confirm button needed
+    else:  # For actions or unknown requests, use our existing confirm-button flow
+        st.session_state.messages.append({"role": "assistant", "content": f"I understood this as: {intent}"})  # Shows the classification
+        st.session_state.pending_intent = intent  # Remembers it so we can show a confirm button
 
-    st.rerun()  # Re-runs the app immediately so the new messages appear right away, without the one-message lag
+    st.rerun()  # Re-runs the app immediately so new messages appear right away
 
 if "pending_intent" in st.session_state:  # Checks if we have a classification to confirm
     intent = st.session_state.pending_intent  # Retrieves the classification

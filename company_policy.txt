@@ -1,0 +1,5 @@
+Remote Work Policy: Employees may work remotely up to 3 days per week with manager approval. Remote work requests must be submitted through the HR portal at least 5 business days in advance.
+
+VPN Access: All remote employees must connect through the company VPN before accessing internal systems. VPN credentials are issued by IT during onboarding and expire after 90 days of inactivity.
+
+Expense Reimbursement: Employees can submit expense reports for approved business expenses through the Finance portal. Reimbursements are processed within 10 business days of approval.
