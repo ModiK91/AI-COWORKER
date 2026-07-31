@@ -1,19 +1,23 @@
 # AI Co-Worker
 
-An AI assistant that understands natural language IT requests and performs real actions (sending emails via Microsoft 365) after human confirmation.
+An AI assistant that understands natural language requests — both questions and actions — and responds appropriately: answering from company documents, or performing real IT actions after human confirmation.
 
 ## What it does
 
-- Takes a typed request (e.g. "I forgot my password")
-- Uses Claude (Anthropic API) to classify the request into one of: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, or UNKNOWN
-- Shows a "Confirm" button before taking any action — the AI suggests, the human approves
-- Sends a real email via Microsoft 365 (Authenticated SMTP) confirming the action
-- If the request is unrecognized, clearly says so instead of guessing
+- Classifies each message as one of: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, KNOWLEDGE_QUESTION, or UNKNOWN
+- **Actions**: shows a "Confirm" button before sending a real email via Microsoft 365 (Authenticated SMTP) — the AI suggests, the human approves
+- **Knowledge questions**: answered using a two-stage RAG pipeline —
+  1. Claude identifies which document chunks are relevant to the question
+  2. Claude answers using only those chunks, citing the source file(s)
+- Searches across multiple documents (`company_policy.txt`, `it_security_policy.txt`)
+- Remembers the full conversation, not just the latest message
+- Clearly says "I don't know" rather than guessing, for both actions and questions
 
 ## Two versions
 
 - **`app.py`** — the main version, a web-based chat interface built with Streamlit
-- **`send_email.py`** — an earlier terminal-based version of the same logic, kept for reference
+- **`send_email.py`** — an earlier terminal-based version of the action-only logic, kept for reference
+- **`test_rag.py`** — isolated RAG experiments, used to build and test the retrieval logic before merging into `app.py`
 
 ## Setup
 
@@ -24,14 +28,14 @@ An AI assistant that understands natural language IT requests and performs real 
     EMAIL_PASSWORD=your_m365_password
     ANTHROPIC_API_KEY=your_anthropic_api_key
 5. Run the web app: `streamlit run app.py`
-   (or run the terminal version: `python send_email.py`)
 
 ## Status
 
-Working prototype: classifies 3 real IT actions with human-confirmed execution, in both a terminal and a web chat interface.
+Working prototype with both core capabilities unified: RAG-based question answering (multi-document, relevance-filtered, cited) and human-confirmed action execution.
 
 ## Next steps
 
-- Add more action types
-- Improve conversation memory (multi-turn context for Claude)
-- Explore connecting to real enterprise tools (Azure AD, ServiceNow) instead of email
+- Add authentication (Entra ID login)
+- Replace email actions with real Azure AD / ServiceNow API calls
+- Add more documents and more action types
+- Consider proper vector embeddings (Azure AI Search) if document count grows significantly

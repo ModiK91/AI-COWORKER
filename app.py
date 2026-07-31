@@ -9,11 +9,20 @@ import smtplib  # Python's built-in tool for sending emails
 load_dotenv()  # Loads ANTHROPIC_API_KEY from .env
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))  # Creates our connection to Claude
 
-with open("company_policy.txt", "r") as file:  # Opens our company document
-    document_text = file.read()  # Reads its entire contents
+document_files = ["company_policy.txt", "it_security_policy.txt"]  # Every document we want to search across
 
-chunks = document_text.split("\n\n")  # Splits it into separate topic chunks
-context = "\n\n".join(chunks)  # Rejoins them into one context block to hand to Claude when needed
+all_chunks = []  # Will hold every chunk from every document, each remembering its source and ID
+
+for filename in document_files:  # Loops through each document file name
+    with open(filename, "r") as file:  # Opens that specific file
+        text = file.read()  # Reads its contents
+
+    file_chunks = text.split("\n\n")  # Splits this document into its own chunks
+
+    for chunk in file_chunks:  # Loops through each chunk from this specific file
+        all_chunks.append({"id": len(all_chunks), "source": filename, "text": chunk})  # Stores the chunk with a unique number, its source, and its text
+
+chunk_list_text = "\n\n".join(f"[{chunk['id']}] (from {chunk['source']}): {chunk['text']}" for chunk in all_chunks)  # Builds a numbered list of every chunk, for Claude to review during retrieval
 
 my_email = "Adam@M365x13102857.onmicrosoft.com"  # The email address we send FROM
 my_password = os.getenv("EMAIL_PASSWORD")  # Reads the EMAIL_PASSWORD value from .env
@@ -52,16 +61,36 @@ if user_message:  # Runs only when the user types something
     intent = response.content[0].text.strip()  # Extracts Claude's one-word classification
 
     if intent == "KNOWLEDGE_QUESTION":  # If this is a question, not an action request
-        answer_response = client.messages.create(  # Asks Claude to answer using our document as context
+        relevance_response = client.messages.create(  # Stage 1: asks Claude which chunks are relevant
+            model="claude-sonnet-4-6",  # Which Claude model to use
+            max_tokens=50,  # We only need a short list of numbers back
+            system="You are a relevance-filtering tool, not a question-answering assistant. You will be shown a numbered list of text chunks and a question. Your ONLY job is to output the numbers of chunks relevant to the question, separated by commas (e.g. '0,3'). Do NOT answer the question. Do NOT explain. Output ONLY numbers and commas, or the word 'none'.",  # Strict relevance-filtering instruction
+            messages=[
+                {"role": "user", "content": f"Chunks:\n{chunk_list_text}\n\nWhich chunk numbers are relevant to this question: '{user_message}'? Remember: output ONLY numbers, nothing else."}  # Shows Claude the chunks and the real question
+            ]
+        )
+
+        relevant_ids_text = relevance_response.content[0].text.strip()  # Extracts Claude's reply
+
+        if relevant_ids_text == "none":  # Handles no relevant chunks found
+            relevant_ids = []  # Empty list
+        else:
+            relevant_ids = [int(id) for id in relevant_ids_text.split(",")]  # Converts "0,3" into [0, 3]
+
+        relevant_chunks = [chunk for chunk in all_chunks if chunk["id"] in relevant_ids]  # Filters down to only relevant chunks
+        filtered_context = "\n\n".join(f"[Source: {chunk['source']}]\n{chunk['text']}" for chunk in relevant_chunks)  # Builds a smaller context from only relevant chunks
+
+        answer_response = client.messages.create(  # Stage 2: asks Claude to answer using only the filtered context
             model="claude-sonnet-4-6",  # Which Claude model to use
             max_tokens=300,  # Maximum length of the answer
-            system=f"Answer the user's question using ONLY the information in this context. If the answer isn't in the context, say you don't know.\n\nContext:\n{context}",  # Grounds Claude's answer in our document
+            system=f"Answer the user's question using ONLY the information in this context. If the answer isn't in the context, say you don't know. At the end of your answer, on a new line, state which source file(s) you used, like 'Source: filename.txt'.\n\nContext:\n{filtered_context}",  # Grounds the answer, requires citation
             messages=[
                 {"role": "user", "content": user_message}  # The user's actual question
             ]
         )
         answer_text = answer_response.content[0].text  # Extracts the answer text
-        st.session_state.messages.append({"role": "assistant", "content": answer_text})  # Shows the answer directly, no confirm button needed
+        st.session_state.messages.append({"role": "assistant", "content": answer_text})  # Shows the cited, grounded answer
+        
     else:  # For actions or unknown requests, use our existing confirm-button flow
         st.session_state.messages.append({"role": "assistant", "content": f"I understood this as: {intent}"})  # Shows the classification
         st.session_state.pending_intent = intent  # Remembers it so we can show a confirm button

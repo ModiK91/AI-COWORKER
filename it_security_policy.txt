@@ -1,0 +1,5 @@
+Password Requirements: All passwords must be at least 12 characters long and include a number and a special character. Passwords must be changed every 180 days.
+
+Device Encryption: All company laptops must have full-disk encryption enabled before connecting to any company system. IT verifies encryption status during onboarding.
+
+Incident Reporting: Any suspected security incident (lost device, phishing email, unauthorized access) must be reported to IT within 1 hour of discovery via the security hotline.
