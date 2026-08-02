@@ -40,7 +40,7 @@ for filepath in document_files:  # Loops through each document's full file path
             text = file.read()  # Reads its contents
 
     display_name = os.path.basename(filepath)  # Extracts just the filename, dropping the folder path
-    
+
     file_chunks = text.split("\n\n")  # Splits this document into its own chunks
 
     for chunk in file_chunks:  # Loops through each chunk from this specific file
@@ -61,7 +61,27 @@ def send_email(subject, body):  # Our reusable "machine" — takes a subject and
     server.sendmail(my_email, to_email, message)  # Sends the email
     server.quit()  # Closes the connection cleanly
 
+if "logged_in" not in st.session_state:  # Checks if we've already tracked login status this session
+    st.session_state.logged_in = False  # If not, starts as "not logged in"
+
+if not st.session_state.logged_in:  # If the user hasn't logged in yet
+    st.title("AI Co-Worker Login")  # Shows a login-specific title
+    password_attempt = st.text_input("Enter password:", type="password")  # Shows a password box (masked input, like real login forms)
+
+    if st.button("Log in"):  # A button to submit the password
+        if password_attempt == os.getenv("APP_PASSWORD"):  # Checks if it matches the real password from .env
+            st.session_state.logged_in = True  # Marks the user as logged in
+            st.rerun()  # Re-runs the app immediately, now showing the real chat interface
+        else:  # Wrong password
+            st.error("Incorrect password.")  # Shows a clear error message
+
+    st.stop()  # Stops the rest of the app from running until login succeeds
+
 st.title("AI Co-Worker")  # Page title
+
+if st.button("Log out"):  # A button to end the session
+    st.session_state.logged_in = False  # Marks the user as logged out
+    st.rerun()  # Re-runs the app immediately, showing the login screen again
 
 if "messages" not in st.session_state:  # Checks if we've already started a message history this session
     st.session_state.messages = []  # If not, creates an empty list to store messages in
