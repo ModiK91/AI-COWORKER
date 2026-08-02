@@ -1,30 +1,51 @@
 import glob  # Python's built-in tool for finding files matching a pattern (like "all .txt files in a folder")
 import streamlit as st  # Imports Streamlit
-
-from dotenv import load_dotenv  # Lets us read secrets from .env
 import os  # Lets us access those loaded secrets
+import smtplib  # Python's built-in tool for sending emails
+
+from docx import Document  # Imports the tool for reading Word (.docx) files
+from pypdf import PdfReader  # Imports the tool for reading PDF files
+from dotenv import load_dotenv  # Lets us read secrets from .env
 from anthropic import Anthropic  # Imports the tool that lets us talk to Claude
 
-import smtplib  # Python's built-in tool for sending emails
 
 load_dotenv()  # Loads ANTHROPIC_API_KEY from .env
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))  # Creates our connection to Claude
 
-document_files = glob.glob("documents/*.txt")  # Automatically finds every .txt file inside the "documents" folder
+def read_docx(filepath):  # Extracts all text from a Word document
+    doc = Document(filepath)  # Opens the .docx file
+    full_text = []  # Collects each paragraph's text
+    for paragraph in doc.paragraphs:  # Loops through every paragraph
+        full_text.append(paragraph.text)  # Adds it to our list
+    return "\n\n".join(full_text)  # Joins paragraphs with blank lines between them
+
+def read_pdf(filepath):  # Extracts all text from a PDF file
+    reader = PdfReader(filepath)  # Opens the PDF file
+    full_text = []  # Collects each page's text
+    for page in reader.pages:  # Loops through every page
+        full_text.append(page.extract_text())  # Adds it to our list
+    return "\n\n".join(full_text)  # Joins pages with blank lines between them
+
+document_files = glob.glob("documents/*.txt") + glob.glob("documents/*.docx") + glob.glob("documents/*.pdf")  # Finds every .txt, .docx, and .pdf file inside the "documents" folder
 
 all_chunks = []  # Will hold every chunk from every document, each remembering its source and ID
 
 for filepath in document_files:  # Loops through each document's full file path
-    with open(filepath, "r") as file:  # Opens that specific file
-        text = file.read()  # Reads its contents
+    if filepath.endswith(".docx"):  # Checks if this is a Word document
+        text = read_docx(filepath)  # Uses our Word-reading function
+    elif filepath.endswith(".pdf"):  # Checks if this is a PDF
+        text = read_pdf(filepath)  # Uses our PDF-reading function
+    else:  # Otherwise, assume it's a plain .txt file
+        with open(filepath, "r") as file:  # Opens the text file normally
+            text = file.read()  # Reads its contents
 
-    display_name = os.path.basename(filepath)  # Extracts just the filename (e.g. "company_policy.txt"), dropping the folder path
-
+    display_name = os.path.basename(filepath)  # Extracts just the filename, dropping the folder path
+    
     file_chunks = text.split("\n\n")  # Splits this document into its own chunks
 
     for chunk in file_chunks:  # Loops through each chunk from this specific file
         all_chunks.append({"id": len(all_chunks), "source": display_name, "text": chunk})  # Stores the chunk with a unique number, its clean filename, and its text
-        
+
 chunk_list_text = "\n\n".join(f"[{chunk['id']}] (from {chunk['source']}): {chunk['text']}" for chunk in all_chunks)  # Builds a numbered list of every chunk, for Claude to review during retrieval
 
 my_email = "Adam@M365x13102857.onmicrosoft.com"  # The email address we send FROM

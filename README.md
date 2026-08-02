@@ -9,7 +9,7 @@ An AI assistant that understands natural language requests — both questions an
 - **Knowledge questions**: answered using a two-stage RAG pipeline —
   1. Claude identifies which document chunks are relevant to the question
   2. Claude answers using only those chunks, citing the source file(s)
-- Searches across multiple documents (`company_policy.txt`, `it_security_policy.txt`)
+- Searches across multiple documents in any mix of `.txt`, `.docx`, and `.pdf` formats, automatically discovered from the `documents/` folder
 - Remembers the full conversation, not just the latest message
 - Clearly says "I don't know" rather than guessing, for both actions and questions
 

@@ -1,11 +1,34 @@
+from docx import Document  # Imports the tool for reading Word (.docx) files
+from pypdf import PdfReader  # Imports the tool for reading PDF files
 from dotenv import load_dotenv  # Lets us read secrets from .env
 import os  # Lets us access those loaded secrets
 from anthropic import Anthropic  # Imports the tool that lets us talk to Claude
 
+def read_docx(filepath):  # A function that extracts all text from a Word document
+    doc = Document(filepath)  # Opens the .docx file
+    full_text = []  # Will collect each paragraph's text
+
+    for paragraph in doc.paragraphs:  # Loops through every paragraph in the document
+        full_text.append(paragraph.text)  # Adds this paragraph's text to our list
+
+    return "\n\n".join(full_text)  # Joins all paragraphs together, separated by blank lines (matching our chunk-splitting style)
+
+
+def read_pdf(filepath):  # A function that extracts all text from a PDF file
+    reader = PdfReader(filepath)  # Opens the PDF file
+    full_text = []  # Will collect each page's text
+
+    for page in reader.pages:  # Loops through every page in the PDF
+        full_text.append(page.extract_text())  # Extracts and adds this page's text to our list
+
+    return "\n\n".join(full_text)  # Joins all pages together, separated by blank lines
+
+
 load_dotenv()  # Loads ANTHROPIC_API_KEY from .env
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))  # Creates our connection to Claude
 
-document_files = ["company_policy.txt", "it_security_policy.txt"]  # A list of every document we want to search across
+#document_files = ["company_policy.txt", "it_security_policy.txt"]  # A list of every document we want to search across
+document_files = ["documents/company_policy.txt", "documents/it_security_policy.txt"]  # A list of every document we want to search across, now inside the documents folder
 
 all_chunks = []  # This will hold every chunk from every document, each remembering its source
 
