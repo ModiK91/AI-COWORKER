@@ -3,3 +3,4 @@ anthropic
 streamlit
 python-docx
 pypdf
+sentence-transformers

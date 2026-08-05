@@ -1,16 +1,25 @@
-import glob  # Python's built-in tool for finding files matching a pattern (like "all .txt files in a folder")
-import streamlit as st  # Imports Streamlit
-import os  # Lets us access those loaded secrets
 import smtplib  # Python's built-in tool for sending emails
+import os  # Lets us access those loaded secrets
+import streamlit as st  # Imports Streamlit
+import glob  # Python's built-in tool for finding files matching a pattern (like "all .txt files in a folder")
+import numpy as np  # A math library, used here to help rank similarity scores
 
-from docx import Document  # Imports the tool for reading Word (.docx) files
-from pypdf import PdfReader  # Imports the tool for reading PDF files
 from dotenv import load_dotenv  # Lets us read secrets from .env
 from anthropic import Anthropic  # Imports the tool that lets us talk to Claude
-
+from docx import Document  # Imports the tool for reading Word (.docx) files
+from pypdf import PdfReader  # Imports the tool for reading PDF files
+from sentence_transformers import SentenceTransformer, util  # Imports the local embedding model and comparison tool
 
 load_dotenv()  # Loads ANTHROPIC_API_KEY from .env
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))  # Creates our connection to Claude
+
+#Cache the embedding model so it only loads once
+@st.cache_resource  # Tells Streamlit to run this function once and reuse the result, instead of repeating it on every interaction
+def load_embedding_model():  # A small function that loads and returns the model
+    return SentenceTransformer("all-MiniLM-L6-v2")  # Loads the local embedding model
+
+embedding_model = load_embedding_model()  # Gets the cached model (loads it only the very first time)
+
 
 def read_docx(filepath):  # Extracts all text from a Word document
     doc = Document(filepath)  # Opens the .docx file
@@ -46,7 +55,14 @@ for filepath in document_files:  # Loops through each document's full file path
     for chunk in file_chunks:  # Loops through each chunk from this specific file
         all_chunks.append({"id": len(all_chunks), "source": display_name, "text": chunk})  # Stores the chunk with a unique number, its clean filename, and its text
 
-chunk_list_text = "\n\n".join(f"[{chunk['id']}] (from {chunk['source']}): {chunk['text']}" for chunk in all_chunks)  # Builds a numbered list of every chunk, for Claude to review during retrieval
+
+#Cache the document chunk embeddings too
+@st.cache_resource  # Ensures this expensive step only runs once, not on every interaction
+def embed_all_chunks(chunks):  # Takes our list of chunks and converts them all into vectors
+    texts = [chunk["text"] for chunk in chunks]  # Extracts just the text from each chunk
+    return embedding_model.encode(texts)  # Converts every chunk into a vector, all at once
+
+chunk_vectors = embed_all_chunks(all_chunks)  # Gets the cached vectors (computed only the very first time)
 
 my_email = "Adam@M365x13102857.onmicrosoft.com"  # The email address we send FROM
 my_password = os.getenv("EMAIL_PASSWORD")  # Reads the EMAIL_PASSWORD value from .env
@@ -105,24 +121,16 @@ if user_message:  # Runs only when the user types something
     intent = response.content[0].text.strip()  # Extracts Claude's one-word classification
 
     if intent == "KNOWLEDGE_QUESTION":  # If this is a question, not an action request
-        relevance_response = client.messages.create(  # Stage 1: asks Claude which chunks are relevant
-            model="claude-sonnet-4-6",  # Which Claude model to use
-            max_tokens=50,  # We only need a short list of numbers back
-            system="You are a relevance-filtering tool, not a question-answering assistant. You will be shown a numbered list of text chunks and a question. Your ONLY job is to output the numbers of chunks relevant to the question, separated by commas (e.g. '0,3'). Do NOT answer the question. Do NOT explain. Output ONLY numbers and commas, or the word 'none'.",  # Strict relevance-filtering instruction
-            messages=[
-                {"role": "user", "content": f"Chunks:\n{chunk_list_text}\n\nWhich chunk numbers are relevant to this question: '{user_message}'? Remember: output ONLY numbers, nothing else."}  # Shows Claude the chunks and the real question
-            ]
-        )
+        
+        question_vector = embedding_model.encode(user_message)  # Converts the user's question into a vector
 
-        relevant_ids_text = relevance_response.content[0].text.strip()  # Extracts Claude's reply
+        similarities = util.cos_sim(question_vector, chunk_vectors)[0]  # Compares the question against every chunk's vector at once
 
-        if relevant_ids_text == "none":  # Handles no relevant chunks found
-            relevant_ids = []  # Empty list
-        else:
-            relevant_ids = [int(id) for id in relevant_ids_text.split(",")]  # Converts "0,3" into [0, 3]
+        top_indices = np.argsort(-similarities)[:3]  # Finds the 3 highest-scoring (most relevant) chunks
 
-        relevant_chunks = [chunk for chunk in all_chunks if chunk["id"] in relevant_ids]  # Filters down to only relevant chunks
-        filtered_context = "\n\n".join(f"[Source: {chunk['source']}]\n{chunk['text']}" for chunk in relevant_chunks)  # Builds a smaller context from only relevant chunks
+        relevant_chunks = [all_chunks[i] for i in top_indices]  # Retrieves the actual chunk data for those top matches
+        filtered_context = "\n\n".join(f"[Source: {chunk['source']}]\n{chunk['text']}" for chunk in relevant_chunks)  # Builds context from only the top embedded matches
+
 
         answer_response = client.messages.create(  # Stage 2: asks Claude to answer using only the filtered context
             model="claude-sonnet-4-6",  # Which Claude model to use

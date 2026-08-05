@@ -6,9 +6,10 @@ An AI assistant that understands natural language requests — both questions an
 
 - Classifies each message as one of: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, KNOWLEDGE_QUESTION, or UNKNOWN
 - **Actions**: shows a "Confirm" button before sending a real email via Microsoft 365 (Authenticated SMTP) — the AI suggests, the human approves
-- **Knowledge questions**: answered using a two-stage RAG pipeline —
-  1. Claude identifies which document chunks are relevant to the question
-  2. Claude answers using only those chunks, citing the source file(s)
+- **Knowledge questions**: answered using real vector-embedding-based RAG —
+  1. Documents are chunked and converted into vector embeddings locally (`sentence-transformers`, cached at startup)
+  2. The question is embedded, then compared against every chunk using cosine similarity — no AI call needed for retrieval
+  3. The top matching chunks are sent to Claude, which answers using only that context and cites the source file(s)
 - Searches across multiple documents in any mix of `.txt`, `.docx`, and `.pdf` formats, automatically discovered from the `documents/` folder
 - Remembers the full conversation, not just the latest message
 - Clearly says "I don't know" rather than guessing, for both actions and questions
