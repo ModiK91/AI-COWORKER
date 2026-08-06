@@ -2,23 +2,23 @@ import smtplib  # Python's built-in tool for sending emails
 import os  # Lets us access those loaded secrets
 import streamlit as st  # Imports Streamlit
 import glob  # Python's built-in tool for finding files matching a pattern (like "all .txt files in a folder")
-import numpy as np  # A math library, used here to help rank similarity scores
+import chromadb  # Imports the vector database tool
 
 from dotenv import load_dotenv  # Lets us read secrets from .env
 from anthropic import Anthropic  # Imports the tool that lets us talk to Claude
 from docx import Document  # Imports the tool for reading Word (.docx) files
 from pypdf import PdfReader  # Imports the tool for reading PDF files
-from sentence_transformers import SentenceTransformer, util  # Imports the local embedding model and comparison tool
 
 load_dotenv()  # Loads ANTHROPIC_API_KEY from .env
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))  # Creates our connection to Claude
 
-#Cache the embedding model so it only loads once
-@st.cache_resource  # Tells Streamlit to run this function once and reuse the result, instead of repeating it on every interaction
-def load_embedding_model():  # A small function that loads and returns the model
-    return SentenceTransformer("all-MiniLM-L6-v2")  # Loads the local embedding model
 
-embedding_model = load_embedding_model()  # Gets the cached model (loads it only the very first time)
+@st.cache_resource  # Ensures we connect to the database only once, not on every interaction
+def get_chroma_collection():  # A function that sets up and returns our database collection
+    chroma_client = chromadb.PersistentClient(path="chroma_db")  # Connects to our persistent database folder
+    return chroma_client.get_or_create_collection("company_documents")  # Creates or opens our collection
+
+collection = get_chroma_collection()  # Gets the cached collection
 
 
 def read_docx(filepath):  # Extracts all text from a Word document
@@ -55,14 +55,17 @@ for filepath in document_files:  # Loops through each document's full file path
     for chunk in file_chunks:  # Loops through each chunk from this specific file
         all_chunks.append({"id": len(all_chunks), "source": display_name, "text": chunk})  # Stores the chunk with a unique number, its clean filename, and its text
 
+if collection.count() == 0:  # Only populate the database if it's currently empty
+    chunk_ids = [f"chunk_{i}" for i in range(len(all_chunks))]  # Creates a unique ID for each chunk
+    chunk_texts = [chunk["text"] for chunk in all_chunks]  # Extracts just the text
+    chunk_metadata = [{"source": chunk["source"]} for chunk in all_chunks]  # Extracts just the source info
 
-#Cache the document chunk embeddings too
-@st.cache_resource  # Ensures this expensive step only runs once, not on every interaction
-def embed_all_chunks(chunks):  # Takes our list of chunks and converts them all into vectors
-    texts = [chunk["text"] for chunk in chunks]  # Extracts just the text from each chunk
-    return embedding_model.encode(texts)  # Converts every chunk into a vector, all at once
+    collection.add(  # Adds everything to the database at once
+        documents=chunk_texts,  # The chunk text
+        ids=chunk_ids,  # Unique IDs
+        metadatas=chunk_metadata  # Source file info
+    )
 
-chunk_vectors = embed_all_chunks(all_chunks)  # Gets the cached vectors (computed only the very first time)
 
 my_email = "Adam@M365x13102857.onmicrosoft.com"  # The email address we send FROM
 my_password = os.getenv("EMAIL_PASSWORD")  # Reads the EMAIL_PASSWORD value from .env
@@ -122,15 +125,15 @@ if user_message:  # Runs only when the user types something
 
     if intent == "KNOWLEDGE_QUESTION":  # If this is a question, not an action request
         
-        question_vector = embedding_model.encode(user_message)  # Converts the user's question into a vector
+        results = collection.query(  # Searches the vector database for the most relevant chunks
+            query_texts=[user_message],  # The user's question (ChromaDB embeds this automatically)
+            n_results=3  # How many top matches to return
+        )
 
-        similarities = util.cos_sim(question_vector, chunk_vectors)[0]  # Compares the question against every chunk's vector at once
-
-        top_indices = np.argsort(-similarities)[:3]  # Finds the 3 highest-scoring (most relevant) chunks
-
-        relevant_chunks = [all_chunks[i] for i in top_indices]  # Retrieves the actual chunk data for those top matches
-        filtered_context = "\n\n".join(f"[Source: {chunk['source']}]\n{chunk['text']}" for chunk in relevant_chunks)  # Builds context from only the top embedded matches
-
+        filtered_context = "\n\n".join(  # Builds context from the top matches returned by ChromaDB
+            f"[Source: {results['metadatas'][0][i]['source']}]\n{results['documents'][0][i]}"  # Pairs each chunk's text with its source
+            for i in range(len(results["documents"][0]))  # Loops through however many results came back
+        )
 
         answer_response = client.messages.create(  # Stage 2: asks Claude to answer using only the filtered context
             model="claude-sonnet-4-6",  # Which Claude model to use

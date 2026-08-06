@@ -4,3 +4,4 @@ streamlit
 python-docx
 pypdf
 sentence-transformers
+chromadb
