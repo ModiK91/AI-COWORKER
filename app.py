@@ -3,6 +3,7 @@ import os  # Lets us access those loaded secrets
 import streamlit as st  # Imports Streamlit
 import glob  # Python's built-in tool for finding files matching a pattern (like "all .txt files in a folder")
 import chromadb  # Imports the vector database tool
+import msal  # Imports Microsoft's authentication library
 
 from dotenv import load_dotenv  # Lets us read secrets from .env
 from anthropic import Anthropic  # Imports the tool that lets us talk to Claude
@@ -12,6 +13,14 @@ from pypdf import PdfReader  # Imports the tool for reading PDF files
 load_dotenv()  # Loads ANTHROPIC_API_KEY from .env
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))  # Creates our connection to Claude
 
+@st.cache_resource  # Ensures we set up the MSAL connection only once
+def get_msal_app():  # A function that creates and returns our connection to Microsoft's sign-in system
+    tenant_id = os.getenv("AZURE_TENANT_ID")  # Your organization's ID
+    client_id = os.getenv("AZURE_CLIENT_ID")  # This app's ID
+    authority = f"https://login.microsoftonline.com/{tenant_id}"  # Your organization's login address
+    return msal.PublicClientApplication(client_id, authority=authority)  # Creates the connection
+
+msal_app = get_msal_app()  # Gets the cached connection
 
 @st.cache_resource  # Ensures we connect to the database only once, not on every interaction
 def get_chroma_collection():  # A function that sets up and returns our database collection
@@ -71,7 +80,7 @@ my_email = "Adam@M365x13102857.onmicrosoft.com"  # The email address we send FRO
 my_password = os.getenv("EMAIL_PASSWORD")  # Reads the EMAIL_PASSWORD value from .env
 
 def send_email(subject, body):  # Our reusable "machine" — takes a subject and body as inputs
-    to_email = "Adam@M365x13102857.onmicrosoft.com"  # Who receives the email (yourself, for testing)
+    to_email = st.session_state.get("user_email", "Adam@M365x13102857.onmicrosoft.com")  # Sends to the real signed-in user if known, otherwise falls back to the test address
     message = f"Subject: {subject}\n\n{body}"  # Combines subject + body into the format email servers expect
 
     server = smtplib.SMTP("smtp.office365.com", 587)  # Connects to Microsoft's outgoing mail server
@@ -94,12 +103,36 @@ if not st.session_state.logged_in:  # If the user hasn't logged in yet
         else:  # Wrong password
             st.error("Incorrect password.")  # Shows a clear error message
 
+    st.divider()  # Draws a visual line to separate the two login options
+
+    if st.button("Sign in with Microsoft"):  # A new button offering real Entra ID login
+        flow = msal_app.initiate_device_flow(scopes=["User.Read"])  # Starts the Microsoft sign-in process
+        st.info(flow["message"])  # Shows the code and instructions to the user
+
+        with st.spinner("Waiting for you to complete sign-in..."):  # Shows a spinner while we wait
+            result = msal_app.acquire_token_by_device_flow(flow)  # Pauses here until sign-in completes (or times out)
+
+        if "access_token" in result:  # Checks if sign-in succeeded
+            st.session_state.logged_in = True  # Marks the user as logged in
+            st.session_state.user_name = result["id_token_claims"]["name"]  # Stores their real name
+            st.session_state.user_email = result["id_token_claims"]["preferred_username"]  # Stores their real email
+            st.rerun()  # Re-runs the app immediately, showing the real chat interface
+        else:  # If sign-in failed
+            st.error("Microsoft sign-in failed. Please try again.")  # Shows an error
+
     st.stop()  # Stops the rest of the app from running until login succeeds
 
 st.title("AI Co-Worker")  # Page title
 
+if "user_name" in st.session_state:  # Checks if we know who's signed in (via Microsoft)
+    st.caption(f"Signed in as {st.session_state.user_name} ({st.session_state.user_email})")  # Shows the real signed-in user
+else:  # If they used the simple password instead
+    st.caption("Signed in with app password")  # Shows a generic label
+
 if st.button("Log out"):  # A button to end the session
     st.session_state.logged_in = False  # Marks the user as logged out
+    st.session_state.pop("user_name", None)  # Clears their name, if it was set
+    st.session_state.pop("user_email", None)  # Clears their email, if it was set
     st.rerun()  # Re-runs the app immediately, showing the login screen again
 
 if "messages" not in st.session_state:  # Checks if we've already started a message history this session
