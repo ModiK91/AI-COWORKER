@@ -15,7 +15,7 @@ An AI assistant that understands natural language requests — both questions an
 - Searches across multiple documents in any mix of `.txt`, `.docx`, and `.pdf` formats, automatically discovered from the `documents/` folder
 - Remembers the full conversation, not just the latest message
 - Clearly says "I don't know" rather than guessing, for both actions and questions
-- Authentication: either a simple password gate, or real Microsoft Entra ID sign-in (device code flow) — when signed in with Microsoft, actions use the real signed-in user's email address
+- Authentication: a simple password gate, real Microsoft Entra ID sign-in (device code flow), or full redirect-based Microsoft Entra ID web login (click to sign in, redirected back automatically) — when signed in with Microsoft, actions use the real signed-in user's email address
 
 ## Two versions
 

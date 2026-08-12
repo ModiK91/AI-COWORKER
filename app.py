@@ -22,6 +22,18 @@ def get_msal_app():  # A function that creates and returns our connection to Mic
 
 msal_app = get_msal_app()  # Gets the cached connection
 
+@st.cache_resource  # Ensures we set up this connection only once
+def get_msal_web_app():  # A function for the web-redirect version of login
+    tenant_id = os.getenv("AZURE_TENANT_ID")  # Your organization's ID
+    client_id = os.getenv("AZURE_CLIENT_ID")  # This app's ID
+    client_secret = os.getenv("AZURE_CLIENT_SECRET")  # This app's secret, proving its identity to Microsoft
+    authority = f"https://login.microsoftonline.com/{tenant_id}"  # Your organization's login address
+    return msal.ConfidentialClientApplication(client_id, authority=authority, client_credential=client_secret)  # Creates a connection that can securely exchange codes for tokens
+
+msal_web_app = get_msal_web_app()  # Gets the cached connection
+
+REDIRECT_URI = "http://localhost:8501"  # Must exactly match what we registered in Entra ID
+
 @st.cache_resource  # Ensures we connect to the database only once, not on every interaction
 def get_chroma_collection():  # A function that sets up and returns our database collection
     chroma_client = chromadb.PersistentClient(path="chroma_db")  # Connects to our persistent database folder
@@ -89,6 +101,24 @@ def send_email(subject, body):  # Our reusable "machine" — takes a subject and
     server.sendmail(my_email, to_email, message)  # Sends the email
     server.quit()  # Closes the connection cleanly
 
+query_params = st.query_params  # Reads any parameters attached to the current URL
+
+if "code" in query_params and "logged_in" not in st.session_state:  # Checks if Microsoft just redirected us back with a login code, and we haven't processed it yet
+    auth_code = query_params["code"]  # Extracts the authorization code from the URL
+
+    result = msal_web_app.acquire_token_by_authorization_code(  # Exchanges the code for a real access token
+        auth_code,  # The code Microsoft gave us
+        scopes=["User.Read"],  # Same permission scope as the request
+        redirect_uri=REDIRECT_URI  # Must match exactly what we used to request the login
+    )
+
+    if "access_token" in result:  # Checks if the exchange succeeded
+        st.session_state.logged_in = True  # Marks the user as logged in
+        st.session_state.user_name = result["id_token_claims"]["name"]  # Stores their real name
+        st.session_state.user_email = result["id_token_claims"]["preferred_username"]  # Stores their real email
+        st.query_params.clear()  # Removes the code from the URL, so it isn't reused or shown
+        st.rerun()  # Re-runs the app immediately, now showing the real chat interface
+
 if "logged_in" not in st.session_state:  # Checks if we've already tracked login status this session
     st.session_state.logged_in = False  # If not, starts as "not logged in"
 
@@ -120,6 +150,15 @@ if not st.session_state.logged_in:  # If the user hasn't logged in yet
         else:  # If sign-in failed
             st.error("Microsoft sign-in failed. Please try again.")  # Shows an error
 
+    st.divider()  # Another visual separator
+
+    auth_url = msal_web_app.get_authorization_request_url(  # Builds the real Microsoft sign-in link
+        scopes=["User.Read"],  # Same permission as before: read the signed-in user's own profile
+        redirect_uri=REDIRECT_URI  # Where Microsoft should send the user back to afterward
+    )
+    button_style = "display:inline-block; padding:0.5em 1em; border:1px solid rgba(250,250,250,0.2); border-radius:0.5em; text-decoration:none; color:inherit;"  # Inline CSS that mimics Streamlit's default button appearance
+
+    st.markdown(f'<a href="{auth_url}" target="_self" style="{button_style}">Sign in with Microsoft (Web)</a>', unsafe_allow_html=True)  # Shows a styled link that opens in the SAME tab
     st.stop()  # Stops the rest of the app from running until login succeeds
 
 st.title("AI Co-Worker")  # Page title
