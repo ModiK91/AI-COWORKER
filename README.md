@@ -4,7 +4,8 @@ An AI assistant that understands natural language requests — both questions an
 
 ## What it does
 
-- Classifies each message as one of: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, KNOWLEDGE_QUESTION, or UNKNOWN
+- Classifies each message as one of: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, KNOWLEDGE_QUESTION, or UNKNOWN
+
 - **Actions**: shows a "Confirm" button before sending a real email via Microsoft 365 (Authenticated SMTP) — the AI suggests, the human approves
 
 - **Knowledge questions**: answered using a real local vector database (ChromaDB) —

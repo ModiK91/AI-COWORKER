@@ -189,7 +189,7 @@ if user_message:  # Runs only when the user types something
     response = client.messages.create(  # Sends the full conversation to Claude for classification
         model="claude-sonnet-4-6",  # Which Claude model to use
         max_tokens=20,  # We only need one short word back
-        system="Reply with ONLY one word: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, KNOWLEDGE_QUESTION, or UNKNOWN, based on the user's most recent message and the conversation so far. Use KNOWLEDGE_QUESTION when the user is asking about company policies or information, rather than requesting an action.",  # Instructions that apply to the whole conversation
+        system="Reply with ONLY one word: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, KNOWLEDGE_QUESTION, or UNKNOWN, based on the user's most recent message and the conversation so far. Use INCIDENT_REPORT when the user is reporting a security incident (lost device, phishing email, suspected unauthorized access). Use KNOWLEDGE_QUESTION when the user is asking about company policies or information, rather than requesting an action.",  # Instructions that apply to the whole conversation
         messages=st.session_state.messages  # Sends the ENTIRE conversation history, not just the latest message
     )
 
@@ -221,6 +221,7 @@ if user_message:  # Runs only when the user types something
     else:  # For actions or unknown requests, use our existing confirm-button flow
         st.session_state.messages.append({"role": "assistant", "content": f"I understood this as: {intent}"})  # Shows the classification
         st.session_state.pending_intent = intent  # Remembers it so we can show a confirm button
+        st.session_state.pending_message = user_message  # Remembers the original message too, so actions like incident reports can reference it later
 
     st.rerun()  # Re-runs the app immediately so new messages appear right away
 
@@ -243,6 +244,10 @@ if "pending_intent" in st.session_state:  # Checks if we have a classification t
         elif intent == "SOFTWARE_ACCESS":  # If the classification is SOFTWARE_ACCESS
             send_email("Software Access Request", "Please grant me access to the requested software.")  # Sends an email to IT
             st.session_state.messages.append({"role": "assistant", "content": "I've sent a software access request to IT."})  # Confirms to the user
+
+        elif intent == "INCIDENT_REPORT":  # If the classification is INCIDENT_REPORT
+            send_email("URGENT: Security Incident Reported", f"A security incident has been reported by {st.session_state.get('user_email', 'a user')}. Details: {st.session_state.pending_message}")  # Sends an urgent email to IT, including the original message for context
+            st.session_state.messages.append({"role": "assistant", "content": "I've reported this security incident to IT as urgent. If this involves a lost device or active unauthorized access, please also contact IT directly by phone."})  # Confirms to the user, with an added safety note
 
         else:  # If the classification is UNKNOWN
             st.session_state.messages.append({"role": "assistant", "content": "I'm not sure how to handle that request. Please contact IT directly."})  # Informs the user of uncertainty
