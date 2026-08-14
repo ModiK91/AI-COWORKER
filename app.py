@@ -189,13 +189,14 @@ if user_message:  # Runs only when the user types something
     response = client.messages.create(  # Sends the full conversation to Claude for classification
         model="claude-sonnet-4-6",  # Which Claude model to use
         max_tokens=20,  # We only need one short word back
-        system="Reply with ONLY one word: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, KNOWLEDGE_QUESTION, or UNKNOWN, based on the user's most recent message and the conversation so far. Use INCIDENT_REPORT when the user is reporting a security incident (lost device, phishing email, suspected unauthorized access). Use KNOWLEDGE_QUESTION when the user is asking about company policies or information, rather than requesting an action.",  # Instructions that apply to the whole conversation
+        system="Classify the user's most recent message using these labels: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, KNOWLEDGE_QUESTION, or UNKNOWN. If the message BOTH asks a question AND requests an action (e.g. 'how do I get VPN access, and can you set it up for me?'), reply with BOTH labels separated by a comma, like 'KNOWLEDGE_QUESTION,SOFTWARE_ACCESS'. Otherwise reply with just ONE label. Reply with ONLY the label(s), nothing else.",  # Allows Claude to detect and flag hybrid requests
         messages=st.session_state.messages  # Sends the ENTIRE conversation history, not just the latest message
     )
 
-    intent = response.content[0].text.strip()  # Extracts Claude's one-word classification
+    intent_text = response.content[0].text.strip()  # Extracts Claude's classification (may be one or two labels)
+    intents = [i.strip() for i in intent_text.split(",")]  # Splits into a list, e.g. ["KNOWLEDGE_QUESTION", "SOFTWARE_ACCESS"]
 
-    if intent == "KNOWLEDGE_QUESTION":  # If this is a question, not an action request
+    if "KNOWLEDGE_QUESTION" in intents:  # If a knowledge question is present (possibly alongside an action too)
         
         results = collection.query(  # Searches the vector database for the most relevant chunks
             query_texts=[user_message],  # The user's question (ChromaDB embeds this automatically)
@@ -210,18 +211,26 @@ if user_message:  # Runs only when the user types something
         answer_response = client.messages.create(  # Stage 2: asks Claude to answer using only the filtered context
             model="claude-sonnet-4-6",  # Which Claude model to use
             max_tokens=300,  # Maximum length of the answer
-            system=f"Answer the user's question using ONLY the information in this context. If the answer isn't in the context, say you don't know. At the end of your answer, on a new line, state which source file(s) you used, like 'Source: filename.txt'.\n\nContext:\n{filtered_context}",  # Grounds the answer, requires citation
+            system=f"Answer ONLY the informational/policy part of the user's question, using ONLY the information in this context. If the answer isn't in the context, say you don't know. Do NOT comment on whether you personally can or cannot perform any requested action — that is handled separately by the system. At the end of your answer, on a new line, state which source file(s) you used, like 'Source: filename.txt'.\n\nContext:\n{filtered_context}",  # Grounds the answer, requires citation, avoids conflicting with the separate action-handling system
             messages=[
                 {"role": "user", "content": user_message}  # The user's actual question
             ]
         )
         answer_text = answer_response.content[0].text  # Extracts the answer text
         st.session_state.messages.append({"role": "assistant", "content": answer_text})  # Shows the cited, grounded answer
-        
-    else:  # For actions or unknown requests, use our existing confirm-button flow
-        st.session_state.messages.append({"role": "assistant", "content": f"I understood this as: {intent}"})  # Shows the classification
-        st.session_state.pending_intent = intent  # Remembers it so we can show a confirm button
-        st.session_state.pending_message = user_message  # Remembers the original message too, so actions like incident reports can reference it later
+
+    st.session_state.pop("pending_intent", None)  # Clears any old, unconfirmed action before processing this new message
+    st.session_state.pop("pending_message", None)  # Clears its associated message too
+    action_labels = ["PASSWORD_RESET", "CREATE_TICKET", "SOFTWARE_ACCESS", "INCIDENT_REPORT"]  # The labels that represent real actions
+    action_intent = next((i for i in intents if i in action_labels), None)  # Finds the action label in the list, if any (there should be at most one)
+
+    if action_intent:  # If an action was also requested (whether alongside a question or on its own)
+        if "KNOWLEDGE_QUESTION" not in intents:  # Only show the classification message if we haven't already shown an answer above
+            st.session_state.messages.append({"role": "assistant", "content": f"I understood this as: {action_intent}"})  # Shows the classification
+        st.session_state.pending_intent = action_intent  # Remembers it so we can show a confirm button
+        st.session_state.pending_message = user_message  # Remembers the original message too
+    elif intents == ["UNKNOWN"]:  # If nothing recognizable was found at all
+        st.session_state.messages.append({"role": "assistant", "content": "Sorry, I don't know how to help with that request yet."})  # Shows the fallback message directly here now
 
     st.rerun()  # Re-runs the app immediately so new messages appear right away
 

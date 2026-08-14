@@ -13,6 +13,7 @@ An AI assistant that understands natural language requests — both questions an
   2. The question is embedded and matched against stored chunks via ChromaDB's built-in search
   3. The top matching chunks are sent to Claude, which answers using only that context and cites the source file(s)
 
+- Handles hybrid requests that both ask a question and require an action (e.g. "how do I get VPN access, and can you request it for me?") — answers the question and offers a confirm button for the action, in one response
 - Searches across multiple documents in any mix of `.txt`, `.docx`, and `.pdf` formats, automatically discovered from the `documents/` folder
 - Remembers the full conversation, not just the latest message
 - Clearly says "I don't know" rather than guessing, for both actions and questions
