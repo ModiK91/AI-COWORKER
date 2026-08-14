@@ -163,6 +163,55 @@ if not st.session_state.logged_in:  # If the user hasn't logged in yet
 
 st.title("AI Co-Worker")  # Page title
 
+with st.sidebar:  # Everything inside this block appears in the sidebar, not the main chat area
+    st.header("📁 Manage Documents")  # A header for this section
+    uploaded_file = st.file_uploader("Upload a document", type=["txt", "docx", "pdf"])  # Lets the user pick a file, restricted to formats we know how to read
+
+    if uploaded_file is not None:  # Runs only when a file has actually been selected
+        save_path = os.path.join("documents", uploaded_file.name)  # Builds the path where we'll save it
+
+        if st.button("Add to knowledge base"):  # Requires an explicit click, so browsing doesn't accidentally add files
+            with open(save_path, "wb") as f:  # Opens a new file in "write bytes" mode
+                f.write(uploaded_file.getbuffer())  # Writes the uploaded file's actual content to disk
+
+            if save_path.endswith(".docx"):  # Reads the newly saved file using the correct method
+                text = read_docx(save_path)
+            elif save_path.endswith(".pdf"):
+                text = read_pdf(save_path)
+            else:
+                with open(save_path, "r") as f:
+                    text = f.read()
+
+            new_chunks = text.split("\n\n")  # Splits the new document into chunks
+            existing_count = collection.count()  # Checks how many chunks already exist, so our new IDs don't clash
+            new_ids = [f"chunk_{existing_count + i}" for i in range(len(new_chunks))]  # Creates unique IDs continuing from where we left off
+            new_metadata = [{"source": uploaded_file.name} for _ in new_chunks]  # Tags each new chunk with this file's name
+
+            collection.add(documents=new_chunks, ids=new_ids, metadatas=new_metadata)  # Adds the new chunks to the database immediately
+
+            st.success(f"Added {uploaded_file.name} ({len(new_chunks)} chunks)")  # Confirms success
+
+    st.divider()  # Visual separator
+    st.subheader("Current documents")  # A small header for this section
+
+    current_files = sorted(set(glob.glob("documents/*.txt") + glob.glob("documents/*.docx") + glob.glob("documents/*.pdf")))  # Finds every document currently on disk
+
+    for filepath in current_files:  # Loops through each one
+        filename = os.path.basename(filepath)  # Extracts just the filename
+        col1, col2 = st.columns([4, 1])  # Splits the row into a wide column (name) and narrow column (delete button)
+        col1.write(f"📄 {filename}")  # Shows the filename in the wide column
+
+        if col2.button("🗑️", key=f"delete_{filename}"):  # A small delete button; key must be unique per file
+            os.remove(filepath)  # Deletes the actual file from disk
+
+            existing = collection.get(where={"source": filename})  # Finds every chunk in the database that came from this file
+            if existing["ids"]:  # If any chunks were found
+                collection.delete(ids=existing["ids"])  # Removes them from the database
+
+            st.success(f"Removed {filename}")  # Confirms deletion
+            st.rerun()  # Refreshes the page immediately, updating the file list
+
+
 if "user_name" in st.session_state:  # Checks if we know who's signed in (via Microsoft)
     st.caption(f"Signed in as {st.session_state.user_name} ({st.session_state.user_email})")  # Shows the real signed-in user
 else:  # If they used the simple password instead
