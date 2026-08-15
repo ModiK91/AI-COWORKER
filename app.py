@@ -5,11 +5,15 @@ import glob  # Python's built-in tool for finding files matching a pattern (like
 import chromadb  # Imports the vector database tool
 import msal  # Imports Microsoft's authentication library
 import shutil  # Python's built-in tool for moving and copying files
+import csv  # Python's built-in tool for reading/writing simple spreadsheet-style files
+
 
 from dotenv import load_dotenv  # Lets us read secrets from .env
 from anthropic import Anthropic  # Imports the tool that lets us talk to Claude
 from docx import Document  # Imports the tool for reading Word (.docx) files
 from pypdf import PdfReader  # Imports the tool for reading PDF files
+from datetime import datetime  # For recording exactly when each event happened
+
 
 load_dotenv()  # Loads ANTHROPIC_API_KEY from .env
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))  # Creates our connection to Claude
@@ -105,6 +109,19 @@ def send_email(subject, body):  # Our reusable "machine" — takes a subject and
 
 query_params = st.query_params  # Reads any parameters attached to the current URL
 
+
+def log_event(user, event_type, details):  # Records one line in our audit log
+    file_exists = os.path.exists("audit_log.csv")  # Checks if the log file already exists
+
+    with open("audit_log.csv", "a", newline="") as f:  # Opens the log file in "append" mode, so we never overwrite past entries
+        writer = csv.writer(f)  # Creates a tool for writing rows in CSV format
+
+        if not file_exists:  # If this is the very first entry
+            writer.writerow(["timestamp", "user", "event_type", "details"])  # Writes a header row first
+
+        writer.writerow([datetime.now().isoformat(), user, event_type, details])  # Writes the actual log entry
+
+
 if "code" in query_params and "logged_in" not in st.session_state:  # Checks if Microsoft just redirected us back with a login code, and we haven't processed it yet
     auth_code = query_params["code"]  # Extracts the authorization code from the URL
 
@@ -118,6 +135,7 @@ if "code" in query_params and "logged_in" not in st.session_state:  # Checks if 
         st.session_state.logged_in = True  # Marks the user as logged in
         st.session_state.user_name = result["id_token_claims"]["name"]  # Stores their real name
         st.session_state.user_email = result["id_token_claims"]["preferred_username"]  # Stores their real email
+        log_event(st.session_state.user_email, "LOGIN", "Signed in via Microsoft (Web SSO)")  # Records this sign-in
         st.query_params.clear()  # Removes the code from the URL, so it isn't reused or shown
         st.rerun()  # Re-runs the app immediately, now showing the real chat interface
 
@@ -131,6 +149,7 @@ if not st.session_state.logged_in:  # If the user hasn't logged in yet
     if st.button("Log in"):  # A button to submit the password
         if password_attempt == os.getenv("APP_PASSWORD"):  # Checks if it matches the real password from .env
             st.session_state.logged_in = True  # Marks the user as logged in
+            log_event("unknown (password login)", "LOGIN", "Signed in via app password")  # Records this sign-in (identity unknown for this method)
             st.rerun()  # Re-runs the app immediately, now showing the real chat interface
         else:  # Wrong password
             st.error("Incorrect password.")  # Shows a clear error message
@@ -148,6 +167,7 @@ if not st.session_state.logged_in:  # If the user hasn't logged in yet
             st.session_state.logged_in = True  # Marks the user as logged in
             st.session_state.user_name = result["id_token_claims"]["name"]  # Stores their real name
             st.session_state.user_email = result["id_token_claims"]["preferred_username"]  # Stores their real email
+            log_event(st.session_state.user_email, "LOGIN", "Signed in via Microsoft (device code)") # Records this sign-in (with the user's unique identifier)
             st.rerun()  # Re-runs the app immediately, showing the real chat interface
         else:  # If sign-in failed
             st.error("Microsoft sign-in failed. Please try again.")  # Shows an error
@@ -256,7 +276,17 @@ with st.sidebar:  # Everything inside this block appears in the sidebar, not the
                 collection.add(documents=restored_chunks, ids=restored_ids, metadatas=restored_metadata)  # Re-adds the chunks to the database
 
                 st.success(f"Restored {filename}")  # Confirms the restore
-                st.rerun()  # Refreshes the page immediately        
+                st.rerun()  # Refreshes the page immediately 
+
+    st.divider()  # Visual separator
+    st.subheader("📋 Audit Log")  # Header for this section
+
+    if os.path.exists("audit_log.csv"):  # Checks if any log entries exist yet
+        import pandas as pd  # A library for working with table-like data, used here just to display the CSV nicely
+        log_df = pd.read_csv("audit_log.csv")  # Reads the log file into a table
+        st.dataframe(log_df.tail(10), use_container_width=True)  # Shows just the 10 most recent entries, in a scrollable table
+    else:  # If no events have been logged yet
+        st.caption("No events logged yet")  # Shows a simple message                   
 
 
 if "user_name" in st.session_state:  # Checks if we know who's signed in (via Microsoft)
@@ -338,20 +368,26 @@ if "pending_intent" in st.session_state:  # Checks if we have a classification t
         del st.session_state.pending_intent  # Clears the pending action, since there's nothing to confirm
     elif st.button(f"Confirm intent: {intent}"):  # For known actions, shows a button to confirm
         
+        current_user = st.session_state.get("user_email", "unknown (password login)")  # Identifies who's performing this action, however they logged in
+
         if intent == "PASSWORD_RESET":  # If the classification is PASSWORD_RESET
             send_email("Password Reset Request", "Please reset my password.")  # Sends an email to IT
+            log_event(current_user, "PASSWORD_RESET", "Password reset requested")  # Records this action in the audit log
             st.session_state.messages.append({"role": "assistant", "content": "I've sent a password reset request to IT."})  # Confirms to the user
 
         elif intent == "CREATE_TICKET":  # If the classification is CREATE_TICKET
             send_email("New Ticket Request", "Please create a new support ticket.")  # Sends an email to IT
+            log_event(current_user, "CREATE_TICKET", "Support ticket requested")  # Records this action in the audit log
             st.session_state.messages.append({"role": "assistant", "content": "I've sent a request to create a new support ticket."})  # Confirms to the user
 
         elif intent == "SOFTWARE_ACCESS":  # If the classification is SOFTWARE_ACCESS
             send_email("Software Access Request", "Please grant me access to the requested software.")  # Sends an email to IT
+            log_event(current_user, "SOFTWARE_ACCESS", "Software access requested")  # Records this action in the audit log
             st.session_state.messages.append({"role": "assistant", "content": "I've sent a software access request to IT."})  # Confirms to the user
 
         elif intent == "INCIDENT_REPORT":  # If the classification is INCIDENT_REPORT
             send_email("URGENT: Security Incident Reported", f"A security incident has been reported by {st.session_state.get('user_email', 'a user')}. Details: {st.session_state.pending_message}")  # Sends an urgent email to IT, including the original message for context
+            log_event(current_user, "INCIDENT_REPORT", st.session_state.pending_message)  # Records the actual incident details in the audit log too
             st.session_state.messages.append({"role": "assistant", "content": "I've reported this security incident to IT as urgent. If this involves a lost device or active unauthorized access, please also contact IT directly by phone."})  # Confirms to the user, with an added safety note
 
         else:  # If the classification is UNKNOWN
