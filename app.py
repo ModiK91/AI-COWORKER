@@ -220,74 +220,75 @@ with st.sidebar:  # Everything inside this block appears in the sidebar, not the
             st.rerun()  # Refreshes the page immediately, showing the now-empty uploader
 
     st.divider()  # Visual separator
-    st.subheader("Current documents")  # A small header for this section
 
     current_files = sorted(set(glob.glob("documents/*.txt") + glob.glob("documents/*.docx") + glob.glob("documents/*.pdf")))  # Finds every document currently on disk
 
-    for filepath in current_files:  # Loops through each one
-        filename = os.path.basename(filepath)  # Extracts just the filename
-        col1, col2 = st.columns([4, 1])  # Splits the row into a wide column (name) and narrow column (menu)
-        col1.write(f"📄 {filename}")  # Shows the filename in the wide column
-
-        menu = col2.popover("⋮")  # A small "⋮" button that reveals a hidden panel when clicked
-        if menu.button("🗑️ Delete", key=f"delete_{filename}"):  # The delete option, tucked inside the popover
-            trash_path = os.path.join("trash", filename)  # Builds the destination path inside trash/
-            shutil.move(filepath, trash_path)  # Moves the file into trash instead of deleting it permanently
-
-            existing = collection.get(where={"source": filename})  # Finds every chunk in the database that came from this file
-            if existing["ids"]:  # If any chunks were found
-                collection.delete(ids=existing["ids"])  # Removes them from search results
-
-            st.success(f"Moved {filename} to trash")  # Confirms the move
-            st.rerun()  # Refreshes the page immediately, updating the file list
+    with st.expander(f"📁 Current documents ({len(current_files)})"):  # A collapsible section, closed by default, showing the count in its title
 
 
-    st.divider()  # Visual separator
-    st.subheader("🗑️ Trash")  # Header for this section
-
-    trashed_files = sorted(glob.glob("trash/*"))  # Finds every file currently sitting in trash
-
-    if not trashed_files:  # If trash is empty
-        st.caption("Trash is empty")  # Shows a simple message
-    else:  # If there's something in trash
-        for filepath in trashed_files:  # Loops through each trashed file
+        for filepath in current_files:  # Loops through each one
             filename = os.path.basename(filepath)  # Extracts just the filename
-            col1, col2 = st.columns([4, 1])  # Same two-column layout as before
-            col1.write(f"🗑️ {filename}")  # Shows the filename
+            col1, col2 = st.columns([4, 1])  # Splits the row into a wide column (name) and narrow column (menu)
+            col1.write(f"📄 {filename}")  # Shows the filename in the wide column
 
             menu = col2.popover("⋮")  # A small "⋮" button that reveals a hidden panel when clicked
-            if menu.button("↩️ Restore", key=f"restore_{filename}"):  # The restore option, tucked inside the popover
-                restore_path = os.path.join("documents", filename)  # Builds the destination path back in documents/
-                shutil.move(filepath, restore_path)  # Moves the file back
+            if menu.button("🗑️ Delete", key=f"delete_{filename}"):  # The delete option, tucked inside the popover
+                trash_path = os.path.join("trash", filename)  # Builds the destination path inside trash/
+                shutil.move(filepath, trash_path)  # Moves the file into trash instead of deleting it permanently
 
-                if restore_path.endswith(".docx"):  # Re-reads the restored file using the correct method
-                    text = read_docx(restore_path)
-                elif restore_path.endswith(".pdf"):
-                    text = read_pdf(restore_path)
-                else:
-                    with open(restore_path, "r") as f:
-                        text = f.read()
+                existing = collection.get(where={"source": filename})  # Finds every chunk in the database that came from this file
+                if existing["ids"]:  # If any chunks were found
+                    collection.delete(ids=existing["ids"])  # Removes them from search results
 
-                restored_chunks = text.split("\n\n")  # Re-splits the restored document into chunks
-                existing_count = collection.count()  # Gets a safe starting point for new IDs
-                restored_ids = [f"chunk_{existing_count + i}" for i in range(len(restored_chunks))]  # Creates fresh unique IDs
-                restored_metadata = [{"source": filename} for _ in restored_chunks]  # Tags each chunk with the filename
+                st.success(f"Moved {filename} to trash")  # Confirms the move
+                st.rerun()  # Refreshes the page immediately, updating the file list
 
-                collection.add(documents=restored_chunks, ids=restored_ids, metadatas=restored_metadata)  # Re-adds the chunks to the database
-
-                st.success(f"Restored {filename}")  # Confirms the restore
-                st.rerun()  # Refreshes the page immediately 
 
     st.divider()  # Visual separator
-    st.subheader("📋 Audit Log")  # Header for this section
+    trashed_files = sorted(glob.glob("trash/*.txt") + glob.glob("trash/*.docx") + glob.glob("trash/*.pdf"))  # Finds every document currently in trash
 
-    if os.path.exists("audit_log.csv"):  # Checks if any log entries exist yet
-        import pandas as pd  # A library for working with table-like data, used here just to display the CSV nicely
-        log_df = pd.read_csv("audit_log.csv")  # Reads the log file into a table
-        st.dataframe(log_df.tail(10), use_container_width=True)  # Shows just the 10 most recent entries, in a scrollable table
-    else:  # If no events have been logged yet
-        st.caption("No events logged yet")  # Shows a simple message                   
+    with st.expander(f"🗑️ Trash ({len(trashed_files)})"):  # A collapsible section for trash, showing the count
 
+
+        if not trashed_files:  # If trash is empty
+            st.caption("Trash is empty")  # Shows a simple message
+        else:  # If there's something in trash
+            for filepath in trashed_files:  # Loops through each trashed file
+                filename = os.path.basename(filepath)  # Extracts just the filename
+                col1, col2 = st.columns([4, 1])  # Same two-column layout as before
+                col1.write(f"🗑️ {filename}")  # Shows the filename
+
+                menu = col2.popover("⋮")  # A small "⋮" button that reveals a hidden panel when clicked
+                if menu.button("↩️ Restore", key=f"restore_{filename}"):  # The restore option, tucked inside the popover
+                    restore_path = os.path.join("documents", filename)  # Builds the destination path back in documents/
+                    shutil.move(filepath, restore_path)  # Moves the file back
+
+                    if restore_path.endswith(".docx"):  # Re-reads the restored file using the correct method
+                        text = read_docx(restore_path)
+                    elif restore_path.endswith(".pdf"):
+                        text = read_pdf(restore_path)
+                    else:
+                        with open(restore_path, "r") as f:
+                            text = f.read()
+
+                    restored_chunks = text.split("\n\n")  # Re-splits the restored document into chunks
+                    existing_count = collection.count()  # Gets a safe starting point for new IDs
+                    restored_ids = [f"chunk_{existing_count + i}" for i in range(len(restored_chunks))]  # Creates fresh unique IDs
+                    restored_metadata = [{"source": filename} for _ in restored_chunks]  # Tags each chunk with the filename
+
+                    collection.add(documents=restored_chunks, ids=restored_ids, metadatas=restored_metadata)  # Re-adds the chunks to the database
+
+                    st.success(f"Restored {filename}")  # Confirms the restore
+                    st.rerun()  # Refreshes the page immediately 
+
+    st.divider()  # Visual separator
+    with st.expander("📋 Audit Log"):  # A collapsible section for the audit log
+        if os.path.exists("audit_log.csv"):  # Checks if any log entries exist yet
+            import pandas as pd  # A library for working with table-like data, used here just to display the CSV nicely
+            log_df = pd.read_csv("audit_log.csv")  # Reads the log file into a table
+            st.dataframe(log_df.tail(10), use_container_width=True)  # Shows just the 10 most recent entries, in a scrollable table
+        else:  # If no events have been logged yet
+            st.caption("No events logged yet")  # Shows a simple message
 
 if "user_name" in st.session_state:  # Checks if we know who's signed in (via Microsoft)
     st.caption(f"Signed in as {st.session_state.user_name} ({st.session_state.user_email})")  # Shows the real signed-in user
