@@ -197,25 +197,27 @@ with st.sidebar:  # Everything inside this block appears in the sidebar, not the
         save_path = os.path.join("documents", uploaded_file.name)  # Builds the path where we'll save it
 
         if st.button("Add to knowledge base"):  # Requires an explicit click, so browsing doesn't accidentally add files
-            with open(save_path, "wb") as f:  # Opens a new file in "write bytes" mode
-                f.write(uploaded_file.getbuffer())  # Writes the uploaded file's actual content to disk
+            with st.spinner(f"Processing {uploaded_file.name}..."):  # Shows a spinner while we save, read, and embed the file
+                with open(save_path, "wb") as f:  # Opens a new file in "write bytes" mode
+                    f.write(uploaded_file.getbuffer())  # Writes the uploaded file's actual content to disk
 
-            if save_path.endswith(".docx"):  # Reads the newly saved file using the correct method
-                text = read_docx(save_path)
-            elif save_path.endswith(".pdf"):
-                text = read_pdf(save_path)
-            else:
-                with open(save_path, "r") as f:
-                    text = f.read()
+                if save_path.endswith(".docx"):  # Reads the newly saved file using the correct method
+                    text = read_docx(save_path)
+                elif save_path.endswith(".pdf"):
+                    text = read_pdf(save_path)
+                else:
+                    with open(save_path, "r") as f:
+                        text = f.read()
 
-            new_chunks = text.split("\n\n")  # Splits the new document into chunks
-            existing_count = collection.count()  # Checks how many chunks already exist, so our new IDs don't clash
-            new_ids = [f"chunk_{existing_count + i}" for i in range(len(new_chunks))]  # Creates unique IDs continuing from where we left off
-            new_metadata = [{"source": uploaded_file.name} for _ in new_chunks]  # Tags each new chunk with this file's name
+                new_chunks = text.split("\n\n")  # Splits the new document into chunks
+                existing_count = collection.count()  # Checks how many chunks already exist, so our new IDs don't clash
+                new_ids = [f"chunk_{existing_count + i}" for i in range(len(new_chunks))]  # Creates unique IDs continuing from where we left off
+                new_metadata = [{"source": uploaded_file.name} for _ in new_chunks]  # Tags each new chunk with this file's name
 
-            collection.add(documents=new_chunks, ids=new_ids, metadatas=new_metadata)  # Adds the new chunks to the database immediately
+                collection.add(documents=new_chunks, ids=new_ids, metadatas=new_metadata)  # Adds the new chunks to the database immediately
 
             st.success(f"Added {uploaded_file.name} ({len(new_chunks)} chunks)")  # Confirms success
+            
             st.session_state.uploader_key += 1  # Changes the uploader's key, so it resets to empty on the next rerun
             st.rerun()  # Refreshes the page immediately, showing the now-empty uploader
 
@@ -313,12 +315,13 @@ user_message = st.chat_input("What do you need help with?")  # Chat input box at
 if user_message:  # Runs only when the user types something
     st.session_state.messages.append({"role": "user", "content": user_message})  # Stores the user's message with its role
 
-    response = client.messages.create(  # Sends the full conversation to Claude for classification
-        model="claude-sonnet-4-6",  # Which Claude model to use
-        max_tokens=20,  # We only need one short word back
-        system="Classify the user's most recent message using these labels: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, KNOWLEDGE_QUESTION, or UNKNOWN. If the message BOTH asks a question AND requests an action (e.g. 'how do I get VPN access, and can you set it up for me?'), reply with BOTH labels separated by a comma, like 'KNOWLEDGE_QUESTION,SOFTWARE_ACCESS'. Otherwise reply with just ONE label. Reply with ONLY the label(s), nothing else.",  # Allows Claude to detect and flag hybrid requests
-        messages=st.session_state.messages  # Sends the ENTIRE conversation history, not just the latest message
-    )
+    with st.spinner("Thinking..."):  # Shows a spinner while Claude classifies the request
+        response = client.messages.create(  # Sends the full conversation to Claude for classification
+            model="claude-sonnet-4-6",  # Which Claude model to use
+            max_tokens=20,  # We only need a short word back
+            system="Classify the user's most recent message using these labels: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, KNOWLEDGE_QUESTION, or UNKNOWN. If the message BOTH asks a question AND requests an action (e.g. 'how do I get VPN access, and can you set it up for me?'), reply with BOTH labels separated by a comma, like 'KNOWLEDGE_QUESTION,SOFTWARE_ACCESS'. Otherwise reply with just ONE label. Reply with ONLY the label(s), nothing else.",  # Allows Claude to detect and flag hybrid requests
+            messages=st.session_state.messages  # Sends the ENTIRE conversation history, not just the latest message
+        )
 
     intent_text = response.content[0].text.strip()  # Extracts Claude's classification (may be one or two labels)
     intents = [i.strip() for i in intent_text.split(",")]  # Splits into a list, e.g. ["KNOWLEDGE_QUESTION", "SOFTWARE_ACCESS"]
@@ -335,14 +338,16 @@ if user_message:  # Runs only when the user types something
             for i in range(len(results["documents"][0]))  # Loops through however many results came back
         )
 
-        answer_response = client.messages.create(  # Stage 2: asks Claude to answer using only the filtered context
-            model="claude-sonnet-4-6",  # Which Claude model to use
-            max_tokens=300,  # Maximum length of the answer
-            system=f"Answer ONLY the informational/policy part of the user's question, using ONLY the information in this context. If the answer isn't in the context, say you don't know. Do NOT comment on whether you personally can or cannot perform any requested action — that is handled separately by the system. At the end of your answer, on a new line, state which source file(s) you used, like 'Source: filename.txt'.\n\nContext:\n{filtered_context}",  # Grounds the answer, requires citation, avoids conflicting with the separate action-handling system
-            messages=[
-                {"role": "user", "content": user_message}  # The user's actual question
-            ]
-        )
+        with st.spinner("Searching documents..."):  # Shows a spinner while Claude generates the grounded answer
+            answer_response = client.messages.create(  # Stage 2: asks Claude to answer using only the filtered context
+                model="claude-sonnet-4-6",  # Which Claude model to use
+                max_tokens=300,  # Maximum length of the answer
+                system=f"Answer ONLY the informational/policy part of the user's question, using ONLY the information in this context. If the answer isn't in the context, say you don't know. Do NOT comment on whether you personally can or cannot perform any requested action — that is handled separately by the system. At the end of your answer, on a new line, state which source file(s) you used, like 'Source: filename.txt'.\n\nContext:\n{filtered_context}",  # Grounds the answer, requires citation, avoids conflicting with the separate action-handling system
+                messages=[
+                    {"role": "user", "content": user_message}  # The user's actual question
+                ]
+            )
+
         answer_text = answer_response.content[0].text  # Extracts the answer text
         st.session_state.messages.append({"role": "assistant", "content": answer_text})  # Shows the cited, grounded answer
 

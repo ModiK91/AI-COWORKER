@@ -20,6 +20,7 @@ An AI assistant that understands natural language requests — both questions an
 - Clearly says "I don't know" rather than guessing, for both actions and questions
 - Authentication: a simple password gate, real Microsoft Entra ID sign-in (device code flow), or full redirect-based Microsoft Entra ID web login (click to sign in, redirected back automatically) — when signed in with Microsoft, actions use the real signed-in user's email address
 - Audit logging: every login and every real action (password reset, ticket, software access, incident report) is recorded with timestamp, user, and details in a local log, viewable in-app via the sidebar
+- Loading indicators (spinners) during classification, RAG answering, and document processing, so the app never appears frozen
 
 
 ## Two versions
