@@ -15,7 +15,7 @@ from pypdf import PdfReader  # Imports the tool for reading PDF files
 from datetime import datetime  # For recording exactly when each event happened
 
 
-load_dotenv()  # Loads ANTHROPIC_API_KEY from .env
+load_dotenv(override=True)  # Loads secrets from .env, always using the latest values even if the process has been running a while
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))  # Creates our connection to Claude
 
 @st.cache_resource  # Ensures we set up the MSAL connection only once
@@ -101,12 +101,18 @@ def send_email(subject, body):  # Our reusable "machine" — takes a subject and
     to_email = st.session_state.get("user_email", "Adam@M365x13102857.onmicrosoft.com")  # Sends to the real signed-in user if known, otherwise falls back to the test address
     message = f"Subject: {subject}\n\n{body}"  # Combines subject + body into the format email servers expect
 
-    server = smtplib.SMTP("smtp.office365.com", 587)  # Connects to Microsoft's outgoing mail server
-    server.starttls()  # Upgrades the connection to an encrypted one
-    server.login(my_email, my_password)  # Logs in with our stored credentials
-    server.sendmail(my_email, to_email, message)  # Sends the email
-    server.quit()  # Closes the connection cleanly
-
+    try:  # Attempts the risky part: connecting to and using an external mail server
+        server = smtplib.SMTP("smtp.office365.com", 587)  # Connects to Microsoft's outgoing mail server
+        server.starttls()  # Upgrades the connection to an encrypted one
+        server.login(my_email, my_password)  # Logs in with our stored credentials
+        server.sendmail(my_email, to_email, message)  # Sends the email
+        server.quit()  # Closes the connection cleanly
+        return True  # Signals success to whoever called this function
+    
+    except Exception as e:  # Catches ANY error that happens during the email process
+        st.session_state.messages.append({"role": "assistant", "content": f"⚠️ I wasn't able to send that email. Please try again, or contact IT directly if this keeps happening. (Error: {e})", "is_error": True})  # Adds a persistent failure message, tagged as an error
+        return False  # Signals failure to whoever called this function
+    
 query_params = st.query_params  # Reads any parameters attached to the current URL
 
 
@@ -152,7 +158,7 @@ if not st.session_state.logged_in:  # If the user hasn't logged in yet
             log_event("unknown (password login)", "LOGIN", "Signed in via app password")  # Records this sign-in (identity unknown for this method)
             st.rerun()  # Re-runs the app immediately, now showing the real chat interface
         else:  # Wrong password
-            st.error("Incorrect password.")  # Shows a clear error message
+            st.error("⚠️ Incorrect password.")  # Shows a clear error message
 
     st.divider()  # Draws a visual line to separate the two login options
 
@@ -170,7 +176,7 @@ if not st.session_state.logged_in:  # If the user hasn't logged in yet
             log_event(st.session_state.user_email, "LOGIN", "Signed in via Microsoft (device code)") # Records this sign-in (with the user's unique identifier)
             st.rerun()  # Re-runs the app immediately, showing the real chat interface
         else:  # If sign-in failed
-            st.error("Microsoft sign-in failed. Please try again.")  # Shows an error
+            st.error("⚠️ Microsoft sign-in failed. Please try again.")  # Shows an error
 
     st.divider()  # Another visual separator
 
@@ -197,27 +203,32 @@ with st.sidebar:  # Everything inside this block appears in the sidebar, not the
         save_path = os.path.join("documents", uploaded_file.name)  # Builds the path where we'll save it
 
         if st.button("Add to knowledge base"):  # Requires an explicit click, so browsing doesn't accidentally add files
-            with st.spinner(f"Processing {uploaded_file.name}..."):  # Shows a spinner while we save, read, and embed the file
-                with open(save_path, "wb") as f:  # Opens a new file in "write bytes" mode
-                    f.write(uploaded_file.getbuffer())  # Writes the uploaded file's actual content to disk
+            try:  # Attempts the risky part: saving, reading, and processing an unpredictable uploaded file
+                with st.spinner(f"Processing {uploaded_file.name}..."):  # Shows a spinner while we save, read, and embed the file
+                    with open(save_path, "wb") as f:  # Opens a new file in "write bytes" mode
+                        f.write(uploaded_file.getbuffer())  # Writes the uploaded file's actual content to disk
 
-                if save_path.endswith(".docx"):  # Reads the newly saved file using the correct method
-                    text = read_docx(save_path)
-                elif save_path.endswith(".pdf"):
-                    text = read_pdf(save_path)
-                else:
-                    with open(save_path, "r") as f:
-                        text = f.read()
+                    if save_path.endswith(".docx"):  # Reads the newly saved file using the correct method
+                        text = read_docx(save_path)
+                    elif save_path.endswith(".pdf"):
+                        text = read_pdf(save_path)
+                    else:
+                        with open(save_path, "r") as f:
+                            text = f.read()
 
-                new_chunks = text.split("\n\n")  # Splits the new document into chunks
-                existing_count = collection.count()  # Checks how many chunks already exist, so our new IDs don't clash
-                new_ids = [f"chunk_{existing_count + i}" for i in range(len(new_chunks))]  # Creates unique IDs continuing from where we left off
-                new_metadata = [{"source": uploaded_file.name} for _ in new_chunks]  # Tags each new chunk with this file's name
+                    new_chunks = text.split("\n\n")  # Splits the new document into chunks
+                    existing_count = collection.count()  # Checks how many chunks already exist, so our new IDs don't clash
+                    new_ids = [f"chunk_{existing_count + i}" for i in range(len(new_chunks))]  # Creates unique IDs continuing from where we left off
+                    new_metadata = [{"source": uploaded_file.name} for _ in new_chunks]  # Tags each new chunk with this file's name
 
-                collection.add(documents=new_chunks, ids=new_ids, metadatas=new_metadata)  # Adds the new chunks to the database immediately
+                    collection.add(documents=new_chunks, ids=new_ids, metadatas=new_metadata)  # Adds the new chunks to the database immediately
 
-            st.success(f"Added {uploaded_file.name} ({len(new_chunks)} chunks)")  # Confirms success
-            
+                st.success(f"Added {uploaded_file.name} ({len(new_chunks)} chunks)")  # Confirms success
+            except Exception as e:  # Catches ANY problem during saving/reading/processing
+                st.error(f"Couldn't process {uploaded_file.name}: {e}")  # Shows a clear error instead of crashing
+                if os.path.exists(save_path):  # If the file was partially saved before the error
+                    os.remove(save_path)  # Cleans it up, so we don't leave a broken half-added file behindave_path)  # Cleans it up, so we don't leave a broken half-added file behind
+                    
             st.session_state.uploader_key += 1  # Changes the uploader's key, so it resets to empty on the next rerun
             st.rerun()  # Refreshes the page immediately, showing the now-empty uploader
 
@@ -242,7 +253,7 @@ with st.sidebar:  # Everything inside this block appears in the sidebar, not the
                 if existing["ids"]:  # If any chunks were found
                     collection.delete(ids=existing["ids"])  # Removes them from search results
 
-                st.success(f"Moved {filename} to trash")  # Confirms the move
+                st.success(f"✅ Moved {filename} to trash")  # Confirms the move
                 st.rerun()  # Refreshes the page immediately, updating the file list
 
 
@@ -280,7 +291,7 @@ with st.sidebar:  # Everything inside this block appears in the sidebar, not the
 
                     collection.add(documents=restored_chunks, ids=restored_ids, metadatas=restored_metadata)  # Re-adds the chunks to the database
 
-                    st.success(f"Restored {filename}")  # Confirms the restore
+                    st.success(f"✅ Restored {filename}")  # Confirms the restore
                     st.rerun()  # Refreshes the page immediately 
 
     st.divider()  # Visual separator
@@ -308,19 +319,23 @@ if "messages" not in st.session_state:  # Checks if we've already started a mess
 
 for message in st.session_state.messages:  # Loops through every message we've stored so far
     with st.chat_message(message["role"]):  # Creates a chat bubble labeled as either "user" or "assistant"
-        st.write(message["content"])  # Displays the message text inside that bubble
-
+        if message.get("is_error"):  # Checks if this specific message was flagged as an error
+            st.error(message["content"])  # Shows it in a red error box instead of plain text
+        else:  # A normal message
+            st.write(message["content"])  # Displays the message text as usual
+            
 user_message = st.chat_input("What do you need help with?")  # Chat input box at the bottom
 
 if user_message:  # Runs only when the user types something
     st.session_state.messages.append({"role": "user", "content": user_message})  # Stores the user's message with its role
 
     with st.spinner("Thinking..."):  # Shows a spinner while Claude classifies the request
+        clean_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]  # Builds a clean copy with ONLY role and content, safe to send to Claude's API
         response = client.messages.create(  # Sends the full conversation to Claude for classification
             model="claude-sonnet-4-6",  # Which Claude model to use
             max_tokens=20,  # We only need a short word back
             system="Classify the user's most recent message using these labels: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, KNOWLEDGE_QUESTION, or UNKNOWN. If the message BOTH asks a question AND requests an action (e.g. 'how do I get VPN access, and can you set it up for me?'), reply with BOTH labels separated by a comma, like 'KNOWLEDGE_QUESTION,SOFTWARE_ACCESS'. Otherwise reply with just ONE label. Reply with ONLY the label(s), nothing else.",  # Allows Claude to detect and flag hybrid requests
-            messages=st.session_state.messages  # Sends the ENTIRE conversation history, not just the latest message
+            messages=clean_messages  # Sends the cleaned conversation history, safe for Claude's API
         )
 
     intent_text = response.content[0].text.strip()  # Extracts Claude's classification (may be one or two labels)
@@ -377,23 +392,27 @@ if "pending_intent" in st.session_state:  # Checks if we have a classification t
         current_user = st.session_state.get("user_email", "unknown (password login)")  # Identifies who's performing this action, however they logged in
 
         if intent == "PASSWORD_RESET":  # If the classification is PASSWORD_RESET
-            send_email("Password Reset Request", "Please reset my password.")  # Sends an email to IT
-            log_event(current_user, "PASSWORD_RESET", "Password reset requested")  # Records this action in the audit log
-            st.session_state.messages.append({"role": "assistant", "content": "I've sent a password reset request to IT."})  # Confirms to the user
+            success = send_email("Password Reset Request", "Please reset my password.")  # Sends an email to IT, remembers if it worked
+            if success:  # Only proceed with success messaging if the email genuinely sent
+                log_event(current_user, "PASSWORD_RESET", "Password reset requested")  # Records this action in the audit log
+                st.session_state.messages.append({"role": "assistant", "content": "I've sent a password reset request to IT."})  # Confirms to the user
 
         elif intent == "CREATE_TICKET":  # If the classification is CREATE_TICKET
-            send_email("New Ticket Request", "Please create a new support ticket.")  # Sends an email to IT
-            log_event(current_user, "CREATE_TICKET", "Support ticket requested")  # Records this action in the audit log
+            success = send_email("New Ticket Request", "Please create a new support ticket.")  # Sends an email to IT
+            if success:  # Only proceed with success messaging if the email genuinely sent
+                log_event(current_user, "CREATE_TICKET", "Support ticket requested")  # Records this action in the audit log
             st.session_state.messages.append({"role": "assistant", "content": "I've sent a request to create a new support ticket."})  # Confirms to the user
 
         elif intent == "SOFTWARE_ACCESS":  # If the classification is SOFTWARE_ACCESS
-            send_email("Software Access Request", "Please grant me access to the requested software.")  # Sends an email to IT
-            log_event(current_user, "SOFTWARE_ACCESS", "Software access requested")  # Records this action in the audit log
+            success = send_email("Software Access Request", "Please grant me access to the requested software.")  # Sends an email to IT
+            if success:  # Only proceed with success messaging if the email genuinely sent
+                log_event(current_user, "SOFTWARE_ACCESS", "Software access requested")  # Records this action in the audit log
             st.session_state.messages.append({"role": "assistant", "content": "I've sent a software access request to IT."})  # Confirms to the user
 
         elif intent == "INCIDENT_REPORT":  # If the classification is INCIDENT_REPORT
-            send_email("URGENT: Security Incident Reported", f"A security incident has been reported by {st.session_state.get('user_email', 'a user')}. Details: {st.session_state.pending_message}")  # Sends an urgent email to IT, including the original message for context
-            log_event(current_user, "INCIDENT_REPORT", st.session_state.pending_message)  # Records the actual incident details in the audit log too
+            success = send_email("URGENT: Security Incident Reported", f"A security incident has been reported by {st.session_state.get('user_email', 'a user')}. Details: {st.session_state.pending_message}")  # Sends an urgent email to IT, including the original message for context
+            if success:  # Only proceed with success messaging if the email genuinely sent
+                log_event(current_user, "INCIDENT_REPORT", st.session_state.pending_message)  # Records the actual incident details in the audit log too
             st.session_state.messages.append({"role": "assistant", "content": "I've reported this security incident to IT as urgent. If this involves a lost device or active unauthorized access, please also contact IT directly by phone."})  # Confirms to the user, with an added safety note
 
         else:  # If the classification is UNKNOWN
