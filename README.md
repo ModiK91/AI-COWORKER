@@ -23,6 +23,7 @@ An AI assistant that understands natural language requests — both questions an
 - Loading indicators (spinners) during classification, RAG answering, and document processing, so the app never appears frozen
 - Graceful error handling: email failures and document processing failures show a clear, persistent message in the chat (in red) instead of crashing the app, and are never falsely logged as successful actions
 - A "New Conversation" button to clear the chat history and any pending action, without logging out
+- A welcome message with example prompts shown when starting a new conversation, so new users immediately understand what the assistant can do
 
 
 ## Two versions

@@ -323,6 +323,20 @@ if st.button("Log out"):  # A button to end the session
 if "messages" not in st.session_state:  # Checks if we've already started a message history this session
     st.session_state.messages = []  # If not, creates an empty list to store messages in
 
+if not st.session_state.messages:  # If there's no conversation yet
+    st.info("""
+👋 Hi! I'm your AI Co-Worker. I can help with:
+
+**Questions** — ask me about company policies (VPN, passwords, remote work, expenses, and more)
+
+**Actions** — I can help you request a password reset, create a support ticket, request software access, or report a security incident
+
+Try asking something like:
+- *"What is the VPN policy?"*
+- *"I forgot my password"*
+- *"How do I request software access, and can you do it for me?"*
+""")  # Shows a friendly welcome message with example prompts, only when the conversation is empty
+
 for message in st.session_state.messages:  # Loops through every message we've stored so far
     with st.chat_message(message["role"]):  # Creates a chat bubble labeled as either "user" or "assistant"
         if message.get("is_error"):  # Checks if this specific message was flagged as an error
