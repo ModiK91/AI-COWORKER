@@ -308,6 +308,12 @@ if "user_name" in st.session_state:  # Checks if we know who's signed in (via Mi
 else:  # If they used the simple password instead
     st.caption("Signed in with app password")  # Shows a generic label
 
+if st.button("🔄 New Conversation"):  # A button to start a fresh conversation
+    st.session_state.messages = []  # Clears the chat history
+    st.session_state.pop("pending_intent", None)  # Clears any pending action, if one exists
+    st.session_state.pop("pending_message", None)  # Clears its associated message too
+    st.rerun()  # Refreshes the page immediately, showing the empty chat
+
 if st.button("Log out"):  # A button to end the session
     st.session_state.logged_in = False  # Marks the user as logged out
     st.session_state.pop("user_name", None)  # Clears their name, if it was set

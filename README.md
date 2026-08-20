@@ -22,6 +22,7 @@ An AI assistant that understands natural language requests — both questions an
 - Audit logging: every login and every real action (password reset, ticket, software access, incident report) is recorded with timestamp, user, and details in a local log, viewable in-app via the sidebar
 - Loading indicators (spinners) during classification, RAG answering, and document processing, so the app never appears frozen
 - Graceful error handling: email failures and document processing failures show a clear, persistent message in the chat (in red) instead of crashing the app, and are never falsely logged as successful actions
+- A "New Conversation" button to clear the chat history and any pending action, without logging out
 
 
 ## Two versions
