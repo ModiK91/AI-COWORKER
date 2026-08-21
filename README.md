@@ -24,6 +24,7 @@ An AI assistant that understands natural language requests — both questions an
 - Graceful error handling: email failures and document processing failures show a clear, persistent message in the chat (in red) instead of crashing the app, and are never falsely logged as successful actions
 - A "New Conversation" button to clear the chat history and any pending action, without logging out
 - A welcome message with example prompts shown when starting a new conversation, so new users immediately understand what the assistant can do
+- Multi-language support: RAG answers and action confirmations automatically respond in the same language the user wrote in (tested with English and Japanese), detected during classification and translated only when needed
 
 
 ## Two versions

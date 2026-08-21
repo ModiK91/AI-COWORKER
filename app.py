@@ -127,6 +127,19 @@ def log_event(user, event_type, details):  # Records one line in our audit log
 
         writer.writerow([datetime.now().isoformat(), user, event_type, details])  # Writes the actual log entry
 
+def translate_if_needed(text, language):  # Translates text into the target language, unless it's already English
+    if language == "en":  # No translation needed for English
+        return text  # Just return the original text as-is
+
+    translation_response = client.messages.create(  # Asks Claude to translate the message
+        model="claude-sonnet-4-6",  # Which Claude model to use
+        max_tokens=200,  # Should be plenty for a short confirmation message
+        system=f"Translate the following message into language code '{language}'. Reply with ONLY the translated text, nothing else.",  # A strict, single-purpose translation instruction
+        messages=[
+            {"role": "user", "content": text}  # The English text to translate
+        ]
+    )
+    return translation_response.content[0].text.strip()  # Returns the translated text
 
 if "code" in query_params and "logged_in" not in st.session_state:  # Checks if Microsoft just redirected us back with a login code, and we haven't processed it yet
     auth_code = query_params["code"]  # Extracts the authorization code from the URL
@@ -354,12 +367,15 @@ if user_message:  # Runs only when the user types something
         response = client.messages.create(  # Sends the full conversation to Claude for classification
             model="claude-sonnet-4-6",  # Which Claude model to use
             max_tokens=20,  # We only need a short word back
-            system="Classify the user's most recent message using these labels: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, KNOWLEDGE_QUESTION, or UNKNOWN. If the message BOTH asks a question AND requests an action (e.g. 'how do I get VPN access, and can you set it up for me?'), reply with BOTH labels separated by a comma, like 'KNOWLEDGE_QUESTION,SOFTWARE_ACCESS'. Otherwise reply with just ONE label. Reply with ONLY the label(s), nothing else.",  # Allows Claude to detect and flag hybrid requests
+            system="Classify the user's most recent message using these labels: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, KNOWLEDGE_QUESTION, or UNKNOWN. If the message BOTH asks a question AND requests an action (e.g. 'how do I get VPN access, and can you set it up for me?'), reply with BOTH labels separated by a comma, like 'KNOWLEDGE_QUESTION,SOFTWARE_ACCESS'. Otherwise reply with just ONE label. Then, on a NEW line, write the 2-letter language code of the message (e.g. 'en' or 'ja'). Reply with ONLY the label(s) then the language code on the next line, nothing else.",  # Also detects the user's language for later use
             messages=clean_messages  # Sends the cleaned conversation history, safe for Claude's API
         )
 
-    intent_text = response.content[0].text.strip()  # Extracts Claude's classification (may be one or two labels)
-    intents = [i.strip() for i in intent_text.split(",")]  # Splits into a list, e.g. ["KNOWLEDGE_QUESTION", "SOFTWARE_ACCESS"]
+    response_lines = response.content[0].text.strip().split("\n")  # Splits Claude's reply into separate lines
+    intent_text = response_lines[0]  # The first line contains the label(s)
+    detected_language = response_lines[1].strip() if len(response_lines) > 1 else "en"  # The second line contains the language code, defaulting to English if missing
+    intents = [i.strip() for i in intent_text.split(",")]  # Splits the labels into a list, e.g. ["KNOWLEDGE_QUESTION", "SOFTWARE_ACCESS"]
+    st.session_state.detected_language = detected_language  # Remembers the detected language for use later (e.g. by action confirmation messages)
 
     if "KNOWLEDGE_QUESTION" in intents:  # If a knowledge question is present (possibly alongside an action too)
         
@@ -377,7 +393,7 @@ if user_message:  # Runs only when the user types something
             answer_response = client.messages.create(  # Stage 2: asks Claude to answer using only the filtered context
                 model="claude-sonnet-4-6",  # Which Claude model to use
                 max_tokens=300,  # Maximum length of the answer
-                system=f"Answer ONLY the informational/policy part of the user's question, using ONLY the information in this context. If the answer isn't in the context, say you don't know. Do NOT comment on whether you personally can or cannot perform any requested action — that is handled separately by the system. At the end of your answer, on a new line, state which source file(s) you used, like 'Source: filename.txt'.\n\nContext:\n{filtered_context}",  # Grounds the answer, requires citation, avoids conflicting with the separate action-handling system
+                system=f"Answer ONLY the informational/policy part of the user's question, using ONLY the information in this context. Respond in the SAME language the user's question was asked in (English or Japanese). If the answer isn't in the context, say you don't know, in that same language. Do NOT comment on whether you personally can or cannot perform any requested action — that is handled separately by the system. At the end of your answer, on a new line, state which source file(s) you used, like 'Source: filename.txt'.\n\nContext:\n{filtered_context}",  # Grounds the answer, requires citation, responds in the user's language
                 messages=[
                     {"role": "user", "content": user_message}  # The user's actual question
                 ]
@@ -415,28 +431,33 @@ if "pending_intent" in st.session_state:  # Checks if we have a classification t
             success = send_email("Password Reset Request", "Please reset my password.")  # Sends an email to IT, remembers if it worked
             if success:  # Only proceed with success messaging if the email genuinely sent
                 log_event(current_user, "PASSWORD_RESET", "Password reset requested")  # Records this action in the audit log
-                st.session_state.messages.append({"role": "assistant", "content": "I've sent a password reset request to IT."})  # Confirms to the user
+                confirmation_text = translate_if_needed("I've sent a password reset request to IT.", st.session_state.get("detected_language", "en"))  # Translates the confirmation into the user's detected language
+                st.session_state.messages.append({"role": "assistant", "content": confirmation_text})  # Confirms to the user, in their language
 
         elif intent == "CREATE_TICKET":  # If the classification is CREATE_TICKET
             success = send_email("New Ticket Request", "Please create a new support ticket.")  # Sends an email to IT
             if success:  # Only proceed with success messaging if the email genuinely sent
                 log_event(current_user, "CREATE_TICKET", "Support ticket requested")  # Records this action in the audit log
-            st.session_state.messages.append({"role": "assistant", "content": "I've sent a request to create a new support ticket."})  # Confirms to the user
+                confirmation_text = translate_if_needed("I've sent a request to create a new support ticket.", st.session_state.get("detected_language", "en"))  # Translates the confirmation into the user's detected language
+                st.session_state.messages.append({"role": "assistant", "content": confirmation_text})  # Confirms to the user, in their language
 
         elif intent == "SOFTWARE_ACCESS":  # If the classification is SOFTWARE_ACCESS
             success = send_email("Software Access Request", "Please grant me access to the requested software.")  # Sends an email to IT
             if success:  # Only proceed with success messaging if the email genuinely sent
                 log_event(current_user, "SOFTWARE_ACCESS", "Software access requested")  # Records this action in the audit log
-            st.session_state.messages.append({"role": "assistant", "content": "I've sent a software access request to IT."})  # Confirms to the user
+                confirmation_text = translate_if_needed("I've sent a software access request to IT.", st.session_state.get("detected_language", "en"))  # Translates the confirmation into the user's detected language
+                st.session_state.messages.append({"role": "assistant", "content": confirmation_text})  # Confirms to the user, in their language
 
         elif intent == "INCIDENT_REPORT":  # If the classification is INCIDENT_REPORT
             success = send_email("URGENT: Security Incident Reported", f"A security incident has been reported by {st.session_state.get('user_email', 'a user')}. Details: {st.session_state.pending_message}")  # Sends an urgent email to IT, including the original message for context
             if success:  # Only proceed with success messaging if the email genuinely sent
                 log_event(current_user, "INCIDENT_REPORT", st.session_state.pending_message)  # Records the actual incident details in the audit log too
-            st.session_state.messages.append({"role": "assistant", "content": "I've reported this security incident to IT as urgent. If this involves a lost device or active unauthorized access, please also contact IT directly by phone."})  # Confirms to the user, with an added safety note
+                confirmation_text = translate_if_needed("I've reported this security incident to IT as urgent. If this involves a lost device or active unauthorized access, please also contact IT directly by phone.", st.session_state.get("detected_language", "en"))  # Translates the confirmation into the user's detected language
+                st.session_state.messages.append({"role": "assistant", "content": confirmation_text})  # Confirms to the user, with an added safety note
 
         else:  # If the classification is UNKNOWN
-            st.session_state.messages.append({"role": "assistant", "content": "I'm not sure how to handle that request. Please contact IT directly."})  # Informs the user of uncertainty
+            confirmation_text = translate_if_needed("I'm not sure how to handle that request. Please contact IT directly.", st.session_state.get("detected_language", "en"))  # Translates the response into the user's detected language
+            st.session_state.messages.append({"role": "assistant", "content": confirmation_text})  # Informs the user of uncertainty
 
         del st.session_state.pending_intent  # Clears the pending intent after confirmation
         
