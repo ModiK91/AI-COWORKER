@@ -25,6 +25,7 @@ An AI assistant that understands natural language requests — both questions an
 - A "New Conversation" button to clear the chat history and any pending action, without logging out
 - A welcome message with example prompts shown when starting a new conversation, so new users immediately understand what the assistant can do
 - Multi-language support: RAG answers and action confirmations automatically respond in the same language the user wrote in (tested with English and Japanese), detected during classification and translated only when needed
+- Chat layout: user messages appear immediately (right-aligned) upon sending, without waiting for the response; assistant messages remain left-aligned
 
 
 ## Two versions

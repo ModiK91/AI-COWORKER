@@ -110,11 +110,20 @@ def send_email(subject, body):  # Our reusable "machine" — takes a subject and
         return True  # Signals success to whoever called this function
     
     except Exception as e:  # Catches ANY error that happens during the email process
-        st.session_state.messages.append({"role": "assistant", "content": f"⚠️ I wasn't able to send that email. Please try again, or contact IT directly if this keeps happening. (Error: {e})", "is_error": True})  # Adds a persistent failure message, tagged as an error
+        confirmation_text = translate_if_needed(f"⚠️ I wasn't able to send that email. Please try again, or contact IT directly if this keeps happening. (Error: {e})", st.session_state.get("detected_language", "en"))
+        st.session_state.messages.append({"role": "assistant", "content": confirmation_text, "is_error": True})  # Adds a persistent failure message, tagged as an error
         return False  # Signals failure to whoever called this function
     
 query_params = st.query_params  # Reads any parameters attached to the current URL
 
+def show_user_message(text):  # Displays a user's message as a custom right-aligned bubble
+    st.markdown(f"""
+    <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+        <div style="background-color:#d1372e; color:white; padding:0.75em 1em; border-radius:1em; max-width:70%;">
+            {text}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)  # A right-aligned, styled bubble built entirely with our own HTML
 
 def log_event(user, event_type, details):  # Records one line in our audit log
     file_exists = os.path.exists("audit_log.csv")  # Checks if the log file already exists
@@ -351,17 +360,21 @@ Try asking something like:
 """)  # Shows a friendly welcome message with example prompts, only when the conversation is empty
 
 for message in st.session_state.messages:  # Loops through every message we've stored so far
-    with st.chat_message(message["role"]):  # Creates a chat bubble labeled as either "user" or "assistant"
-        if message.get("is_error"):  # Checks if this specific message was flagged as an error
-            st.error(message["content"])  # Shows it in a red error box instead of plain text
-        else:  # A normal message
-            st.write(message["content"])  # Displays the message text as usual
-            
+    if message["role"] == "user":  # If this is a user message
+        show_user_message(message["content"])  # Displays it as a right-aligned bubble
+    else:  # An assistant message
+        with st.chat_message("assistant"):  # Creates a normal chat bubble, left-aligned as before
+            if message.get("is_error"):  # Checks if this specific message was flagged as an error
+                st.error(message["content"])  # Shows it in a red error box instead of plain text
+            else:  # A normal message
+                st.write(message["content"])  # Displays the message text as usual
+                
 user_message = st.chat_input("What do you need help with?")  # Chat input box at the bottom
 
 if user_message:  # Runs only when the user types something
     st.session_state.messages.append({"role": "user", "content": user_message})  # Stores the user's message with its role
-
+    show_user_message(user_message)  # Immediately displays the new message as a right-aligned bubble
+    
     with st.spinner("Thinking..."):  # Shows a spinner while Claude classifies the request
         clean_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]  # Builds a clean copy with ONLY role and content, safe to send to Claude's API
         response = client.messages.create(  # Sends the full conversation to Claude for classification
