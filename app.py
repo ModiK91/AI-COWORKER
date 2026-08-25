@@ -335,7 +335,21 @@ with st.sidebar:  # Everything inside this block appears in the sidebar, not the
     with st.expander("📋 Audit Log"):  # A collapsible section for the audit log
         if os.path.exists("audit_log.csv"):  # Checks if any log entries exist yet
             log_df = pd.read_csv("audit_log.csv")  # Reads the log file into a table
-            st.dataframe(log_df.tail(10), use_container_width=True)  # Shows just the 10 most recent entries, in a scrollable table
+
+            users = ["All"] + sorted(log_df["user"].unique().tolist())  # Builds a list of every unique user, plus an "All" option
+            selected_user = st.selectbox("Filter by user", users)  # A dropdown to pick a specific user, or "All"
+
+            event_types = ["All"] + sorted(log_df["event_type"].unique().tolist())  # Builds a list of every unique event type, plus "All"
+            selected_event = st.selectbox("Filter by event type", event_types)  # A dropdown to pick a specific event type, or "All"
+
+            filtered_df = log_df.copy()  # Starts with a full copy of the log
+            if selected_user != "All":  # If a specific user was chosen
+                filtered_df = filtered_df[filtered_df["user"] == selected_user]  # Narrows down to just that user's entries
+            if selected_event != "All":  # If a specific event type was chosen
+                filtered_df = filtered_df[filtered_df["event_type"] == selected_event]  # Narrows down further to just that event type
+
+            st.caption(f"Showing {len(filtered_df)} of {len(log_df)} total events")  # Shows how many entries match, out of the total
+            st.dataframe(filtered_df.tail(20), use_container_width=True)  # Shows up to the 20 most recent matching entries
         else:  # If no events have been logged yet
             st.caption("No events logged yet")  # Shows a simple message
 
