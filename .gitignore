@@ -4,3 +4,4 @@ __pycache__/
 chroma_db/
 trash/
 audit_log.csv
+tickets.csv

@@ -6,7 +6,7 @@ import chromadb  # Imports the vector database tool
 import msal  # Imports Microsoft's authentication library
 import shutil  # Python's built-in tool for moving and copying files
 import csv  # Python's built-in tool for reading/writing simple spreadsheet-style files
-
+import pandas as pd  # A library for working with table-like data, used here just to display the CSV nicely
 
 from dotenv import load_dotenv  # Lets us read secrets from .env
 from anthropic import Anthropic  # Imports the tool that lets us talk to Claude
@@ -135,6 +135,21 @@ def log_event(user, event_type, details):  # Records one line in our audit log
             writer.writerow(["timestamp", "user", "event_type", "details"])  # Writes a header row first
 
         writer.writerow([datetime.now().isoformat(), user, event_type, details])  # Writes the actual log entry
+
+import random  # Python's built-in tool for generating random values, used here to create realistic ticket IDs
+import string  # Provides sets of characters (letters, digits) to build from
+
+def create_ticket_record(user, description):  # Creates a new simulated ticket and stores it
+    ticket_id = "TCK-" + "".join(random.choices(string.digits, k=6))  # Builds a random 6-digit ticket ID, e.g. "TCK-482913"
+    file_exists = os.path.exists("tickets.csv")  # Checks if the tickets file already exists
+
+    with open("tickets.csv", "a", newline="") as f:  # Opens the tickets file in "append" mode
+        writer = csv.writer(f)  # Creates a tool for writing rows in CSV format
+        if not file_exists:  # If this is the very first ticket ever created
+            writer.writerow(["ticket_id", "user", "description", "status", "created_at"])  # Writes a header row first
+        writer.writerow([ticket_id, user, description, "Open", datetime.now().isoformat()])  # Writes the new ticket's details
+
+    return ticket_id  # Returns the new ticket ID, so we can tell the user
 
 def translate_if_needed(text, language):  # Translates text into the target language, unless it's already English
     if language == "en":  # No translation needed for English
@@ -319,7 +334,6 @@ with st.sidebar:  # Everything inside this block appears in the sidebar, not the
     st.divider()  # Visual separator
     with st.expander("📋 Audit Log"):  # A collapsible section for the audit log
         if os.path.exists("audit_log.csv"):  # Checks if any log entries exist yet
-            import pandas as pd  # A library for working with table-like data, used here just to display the CSV nicely
             log_df = pd.read_csv("audit_log.csv")  # Reads the log file into a table
             st.dataframe(log_df.tail(10), use_container_width=True)  # Shows just the 10 most recent entries, in a scrollable table
         else:  # If no events have been logged yet
@@ -368,7 +382,7 @@ for message in st.session_state.messages:  # Loops through every message we've s
                 st.error(message["content"])  # Shows it in a red error box instead of plain text
             else:  # A normal message
                 st.write(message["content"])  # Displays the message text as usual
-                
+
 user_message = st.chat_input("What do you need help with?")  # Chat input box at the bottom
 
 if user_message:  # Runs only when the user types something
@@ -380,7 +394,7 @@ if user_message:  # Runs only when the user types something
         response = client.messages.create(  # Sends the full conversation to Claude for classification
             model="claude-sonnet-4-6",  # Which Claude model to use
             max_tokens=20,  # We only need a short word back
-            system="Classify the user's most recent message using these labels: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, KNOWLEDGE_QUESTION, or UNKNOWN. If the message BOTH asks a question AND requests an action (e.g. 'how do I get VPN access, and can you set it up for me?'), reply with BOTH labels separated by a comma, like 'KNOWLEDGE_QUESTION,SOFTWARE_ACCESS'. Otherwise reply with just ONE label. Then, on a NEW line, write the 2-letter language code of the message (e.g. 'en' or 'ja'). Reply with ONLY the label(s) then the language code on the next line, nothing else.",  # Also detects the user's language for later use
+            system="Classify the user's most recent message using these labels: PASSWORD_RESET, CREATE_TICKET, SOFTWARE_ACCESS, INCIDENT_REPORT, CHECK_TICKET_STATUS, KNOWLEDGE_QUESTION, or UNKNOWN. Use CHECK_TICKET_STATUS when the user is asking about the status of an existing ticket they already created, NOT when creating a new one. If the message BOTH asks a question AND requests an action (e.g. 'how do I get VPN access, and can you set it up for me?'), reply with BOTH labels separated by a comma, like 'KNOWLEDGE_QUESTION,SOFTWARE_ACCESS'. Otherwise reply with just ONE label. Then, on a NEW line, write the 2-letter language code of the message (e.g. 'en' or 'ja'). Reply with ONLY the label(s) then the language code on the next line, nothing else.",  # Also detects the user's language for later use
             messages=clean_messages  # Sends the cleaned conversation history, safe for Claude's API
         )
 
@@ -389,6 +403,24 @@ if user_message:  # Runs only when the user types something
     detected_language = response_lines[1].strip() if len(response_lines) > 1 else "en"  # The second line contains the language code, defaulting to English if missing
     intents = [i.strip() for i in intent_text.split(",")]  # Splits the labels into a list, e.g. ["KNOWLEDGE_QUESTION", "SOFTWARE_ACCESS"]
     st.session_state.detected_language = detected_language  # Remembers the detected language for use later (e.g. by action confirmation messages)
+
+    if "CHECK_TICKET_STATUS" in intents:  # If the user is asking about an existing ticket
+        current_user = st.session_state.get("user_email", "unknown (password login)")  # Identifies who's asking
+
+        if os.path.exists("tickets.csv"):  # Checks if any tickets have ever been created
+            tickets_df = pd.read_csv("tickets.csv")  # Reads all tickets into a table
+            user_tickets = tickets_df[tickets_df["user"] == current_user]  # Filters to only this user's tickets
+        else:  # No tickets file exists at all yet
+            user_tickets = pd.DataFrame()  # An empty table, meaning no tickets
+
+        if user_tickets.empty:  # If this user has no tickets on record
+            status_text = translate_if_needed("You don't have any tickets on record yet. Would you like me to create one?", st.session_state.get("detected_language", "en"))  # Translated response
+        else:  # If they have at least one ticket
+            latest = user_tickets.iloc[-1]  # Gets their most recently created ticket
+            status_text = translate_if_needed(f"Your most recent ticket is {latest['ticket_id']} (\"{latest['description']}\"), status: {latest['status']}, created {latest['created_at'][:10]}.", st.session_state.get("detected_language", "en"))  # Translated response with real ticket details
+
+        st.session_state.messages.append({"role": "assistant", "content": status_text})  # Shows the ticket status directly, no confirmation needed
+
 
     if "KNOWLEDGE_QUESTION" in intents:  # If a knowledge question is present (possibly alongside an action too)
         
@@ -425,7 +457,7 @@ if user_message:  # Runs only when the user types something
             st.session_state.messages.append({"role": "assistant", "content": f"I understood this as: {action_intent}"})  # Shows the classification
         st.session_state.pending_intent = action_intent  # Remembers it so we can show a confirm button
         st.session_state.pending_message = user_message  # Remembers the original message too
-    elif intents == ["UNKNOWN"]:  # If nothing recognizable was found at all
+    elif "CHECK_TICKET_STATUS" not in intents and "KNOWLEDGE_QUESTION" not in intents:  # Only show the fallback if NOTHING else has already handled this message
         st.session_state.messages.append({"role": "assistant", "content": "Sorry, I don't know how to help with that request yet."})  # Shows the fallback message directly here now
 
     st.rerun()  # Re-runs the app immediately so new messages appear right away
@@ -450,8 +482,9 @@ if "pending_intent" in st.session_state:  # Checks if we have a classification t
         elif intent == "CREATE_TICKET":  # If the classification is CREATE_TICKET
             success = send_email("New Ticket Request", "Please create a new support ticket.")  # Sends an email to IT
             if success:  # Only proceed with success messaging if the email genuinely sent
-                log_event(current_user, "CREATE_TICKET", "Support ticket requested")  # Records this action in the audit log
-                confirmation_text = translate_if_needed("I've sent a request to create a new support ticket.", st.session_state.get("detected_language", "en"))  # Translates the confirmation into the user's detected language
+                ticket_id = create_ticket_record(current_user, st.session_state.pending_message)  # Creates a simulated ticket record and gets its ID
+                log_event(current_user, "CREATE_TICKET", f"Support ticket requested ({ticket_id})")  # Records this action, including the ticket ID, in the audit log
+                confirmation_text = translate_if_needed(f"I've created ticket {ticket_id} for you and sent it to IT. You can ask me about its status anytime.", st.session_state.get("detected_language", "en"))  # Translates the confirmation, now including the real ticket ID
                 st.session_state.messages.append({"role": "assistant", "content": confirmation_text})  # Confirms to the user, in their language
 
         elif intent == "SOFTWARE_ACCESS":  # If the classification is SOFTWARE_ACCESS

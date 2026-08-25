@@ -26,6 +26,7 @@ An AI assistant that understands natural language requests — both questions an
 - A welcome message with example prompts shown when starting a new conversation, so new users immediately understand what the assistant can do
 - Multi-language support: RAG answers and action confirmations automatically respond in the same language the user wrote in (tested with English and Japanese), detected during classification and translated only when needed
 - Chat layout: user messages appear immediately (right-aligned) upon sending, without waiting for the response; assistant messages remain left-aligned
+- Simulated ticket tracking: creating a ticket generates a real ticket ID (e.g. TCK-482913), stored locally; users can later ask about their ticket status and get the real recorded details
 
 
 ## Two versions
