@@ -336,6 +336,20 @@ with st.sidebar:  # Everything inside this block appears in the sidebar, not the
         if os.path.exists("audit_log.csv"):  # Checks if any log entries exist yet
             log_df = pd.read_csv("audit_log.csv")  # Reads the log file into a table
 
+            with st.expander("📊 Analytics"):  # A NESTED, separately collapsible section just for charts
+                event_counts = log_df["event_type"].value_counts()  # Counts how many times each event type occurs
+                st.caption("Events by type")  # A small label instead of a full subheader, to save space
+                st.bar_chart(event_counts, height=150)  # Displays counts as a compact bar chart
+
+                log_df["date"] = pd.to_datetime(log_df["timestamp"]).dt.date  # Extracts just the date (no time) from each timestamp
+                daily_counts = log_df.groupby("date").size()  # Counts how many events happened on each day
+                st.caption("Activity over time")  # A small label
+                st.line_chart(daily_counts, height=150)  # Displays activity over time, compactly
+
+                user_counts = log_df["user"].value_counts().head(5)  # Counts events per user, keeping just the top 5
+                st.caption("Most active users")  # A small label
+                st.bar_chart(user_counts, height=150)  # Displays it compactly
+
             users = ["All"] + sorted(log_df["user"].unique().tolist())  # Builds a list of every unique user, plus an "All" option
             selected_user = st.selectbox("Filter by user", users)  # A dropdown to pick a specific user, or "All"
 
