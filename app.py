@@ -367,6 +367,38 @@ with st.sidebar:  # Everything inside this block appears in the sidebar, not the
         else:  # If no events have been logged yet
             st.caption("No events logged yet")  # Shows a simple message
 
+    st.divider()  # Visual separator
+    with st.expander("❓ FAQ Generator"):  # A collapsible section for FAQ generation
+        if st.button("Generate FAQ from recent questions"):  # A button to trigger generation on demand
+            if os.path.exists("audit_log.csv"):  # Checks if any log entries exist yet
+                log_df = pd.read_csv("audit_log.csv")  # Reads the log file into a table
+                questions = log_df[log_df["event_type"] == "KNOWLEDGE_QUESTION"]["details"].tolist()  # Pulls out just the actual question text from every logged knowledge question
+
+                if len(questions) < 3:  # Requires a minimum amount of data to produce something meaningful
+                    st.info("Not enough questions logged yet to generate a useful FAQ. Keep using the assistant, then try again later.")  # Explains why nothing happened
+                else:
+                    with st.spinner("Analyzing questions and generating FAQ..."):  # Shows a spinner while Claude works
+                        questions_text = "\n".join(f"- {q}" for q in questions)  # Builds a simple bulleted list of every question asked
+
+                        relevant_chunks_for_faq = collection.query(query_texts=[questions_text], n_results=10)  # Retrieves the document chunks most relevant to ALL the questions combined
+                        faq_context = "\n\n".join(  # Builds a context block from those chunks, same style as regular RAG answers
+                            f"[Source: {relevant_chunks_for_faq['metadatas'][0][i]['source']}]\n{relevant_chunks_for_faq['documents'][0][i]}"
+                            for i in range(len(relevant_chunks_for_faq["documents"][0]))
+                        )
+
+                        faq_response = client.messages.create(  # Asks Claude to identify patterns and write a clean, GROUNDED FAQ
+                            model="claude-sonnet-4-6",  # Which Claude model to use
+                            max_tokens=800,  # Enough room for a genuinely useful FAQ list
+                            system=f"You will be given a list of real questions employees have asked an IT assistant, and relevant company document excerpts. Identify the most common or recurring THEMES (not necessarily exact duplicate questions), and write a clean FAQ list: for each theme, write one representative question and answer it USING ONLY the provided document context. If a theme genuinely isn't covered by the context, say so honestly rather than guessing. Cite the source file for each answer. Format as markdown with clear headers.\n\nContext:\n{faq_context}",  # Grounds the FAQ answers in real documents
+                            messages=[
+                                {"role": "user", "content": f"Here are the questions asked:\n{questions_text}"}  # The actual question history
+                            ]
+                        )
+
+                        st.markdown(faq_response.content[0].text)  # Displays the generated, grounded FAQ
+            else:  # No log file exists at all yet
+                st.info("No questions have been logged yet.")  # Explains why nothing happened
+
 if "user_name" in st.session_state:  # Checks if we know who's signed in (via Microsoft)
     st.caption(f"Signed in as {st.session_state.user_name} ({st.session_state.user_email})")  # Shows the real signed-in user
 else:  # If they used the simple password instead
@@ -474,6 +506,9 @@ if user_message:  # Runs only when the user types something
 
         answer_text = answer_response.content[0].text  # Extracts the answer text
         st.session_state.messages.append({"role": "assistant", "content": answer_text})  # Shows the cited, grounded answer
+
+        current_user = st.session_state.get("user_email", "unknown (password login)")  # Identifies who asked
+        log_event(current_user, "KNOWLEDGE_QUESTION", user_message)  # Records the actual question asked, for later FAQ analysis
 
     st.session_state.pop("pending_intent", None)  # Clears any old, unconfirmed action before processing this new message
     st.session_state.pop("pending_message", None)  # Clears its associated message too
